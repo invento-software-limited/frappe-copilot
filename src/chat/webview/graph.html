@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workflow Graph</title>
+<style>
+  :root {
+    --bg: #1e1e2e;
+    --surface: #252536;
+    --surface2: #313244;
+    --text: #cdd6f4;
+    --text2: #a6adc8;
+    --accent: #89b4fa;
+    --green: #a6e3a1;
+    --red: #f38ba8;
+    --yellow: #f9e2af;
+    --muted: #6c7086;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text);
+    height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+
+  /* ─── Header ─── */
+  .header {
+    padding: 8px 16px; background: #181825;
+    border-bottom: 1px solid var(--surface2);
+    display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0;
+  }
+  .header h2 { font-size: 14px; color: var(--accent); font-weight: 600; }
+  .header .state-badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    font-weight: 500; margin-left: 8px;
+  }
+  .state-idle { background: var(--muted); color: #fff; }
+  .state-running { background: var(--yellow); color: #1e1e2e; }
+  .state-completed { background: var(--green); color: #1e1e2e; }
+  .state-failed { background: var(--red); color: #1e1e2e; }
+  .header-btn {
+    margin-left: auto; background: var(--surface);
+    color: var(--text); border: 1px solid var(--surface2);
+    border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+  }
+  .header-btn:hover { background: var(--surface2); }
+
+  /* ─── Graph canvas ─── */
+  #graph-container {
+    flex: 1; overflow: auto; padding: 20px;
+    display: flex; justify-content: center;
+  }
+  svg { min-width: 600px; }
+
+  /* ─── Empty state ─── */
+  .empty-state {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; color: var(--muted); font-style: italic;
+    flex-direction: column; gap: 12px;
+  }
+  .empty-state .icon { font-size: 48px; opacity: 0.5; }
+
+  /* ─── Node tooltip ─── */
+  .tooltip {
+    display: none;
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--surface2);
+    border-radius: 8px;
+    padding: 12px 16px;
+    max-width: 400px;
+    font-size: 13px;
+    line-height: 1.5;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    z-index: 100;
+    pointer-events: none;
+  }
+  .tooltip.visible { display: block; }
+  .tooltip .tt-label { font-weight: 600; color: var(--accent); }
+  .tooltip .tt-desc { color: var(--text2); margin-top: 4px; }
+  .tooltip .tt-status { margin-top: 4px; font-size: 12px; }
+  .tooltip .tt-result { margin-top: 6px; color: var(--text); font-size: 12px; max-height: 150px; overflow-y: auto; }
+
+  /* ─── Scrollbar ─── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 3px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h2>✦ Agent Workflow</h2>
+    <span id="state-badge" class="state-badge state-idle">idle</span>
+    <button id="reset-btn" class="header-btn">Reset Graph</button>
+  </div>
+
+  <div id="graph-container">
+    <div class="empty-state" id="empty-state">
+      <div class="icon">📋</div>
+      <div>No active workflow. Upload a PDF or HTML prototype to start.</div>
+    </div>
+    <svg id="graph-svg" style="display:none;"></svg>
+  </div>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    (function() {
+      const vscode = acquireVsCodeApi();
+      const container = document.getElementById('graph-container');
+      const svg = document.getElementById('graph-svg');
+      const emptyState = document.getElementById('empty-state');
+      const stateBadge = document.getElementById('state-badge');
+      const tooltip = document.getElementById('tooltip');
+
+      // ─── Constants ───
+      const NODE_W = 180;
+      const NODE_H = 56;
+      const LEVEL_GAP = 90;
+      const NODE_GAP = 24;
+      const PAD_X = 60;
+      const PAD_Y = 40;
+      const RADIUS = 8;
+
+      const STATUS_COLORS = {
+        pending: { fill: '#313244', stroke: '#6c7086', text: '#a6adc8' },
+        running: { fill: '#2e3b4e', stroke: '#f9e2af', text: '#f9e2af' },
+        completed: { fill: '#1e3a2e', stroke: '#a6e3a1', text: '#a6e3a1' },
+        failed: { fill: '#3a1e1e', stroke: '#f38ba8', text: '#f38ba8' },
+      };
+
+      const TYPE_ICONS = {
+        input: '📄', splitter: '✂️', chunk: '📋',
+        reader: '🔍', merger: '🧩', output: '✅',
+      };
+
+      const TYPE_FILLS = {
+        input: '#1e1e3a', splitter: '#2a2a1e', chunk: '#252536',
+        reader: '#1e2a3a', merger: '#2a1e3a', output: '#1e3a2e',
+      };
+
+      // ─── State ───
+      let currentGraph = null;
+
+      // ─── Layout algorithm ───
+      function layoutGraph(graph) {
+        if (!graph || !graph.nodes || graph.nodes.length === 0) return [];
+
+        // Group nodes by type → level
+        const levels = {
+          input: 0, splitter: 1, chunk: 2,
+          reader: 3, merger: 4, output: 5,
+        };
+
+        // Build level groups
+        const groups = {};
+        for (const node of graph.nodes) {
+          const level = levels[node.type] ?? 3;
+          if (!groups[level]) groups[level] = [];
+          groups[level].push(node);
+        }
+
+        // Position each node
+        const positioned = [];
+        const maxPerLevel = Math.max(...Object.values(groups).map(g => g.length), 1);
+
+        for (const [levelStr, nodes] of Object.entries(groups)) {
+          const level = parseInt(levelStr);
+          const y = PAD_Y + level * LEVEL_GAP;
+          const count = nodes.length;
+          const totalWidth = count * NODE_W + (count - 1) * NODE_GAP;
+          let startX = PAD_X + Math.max(0, (maxPerLevel * NODE_W + (maxPerLevel - 1) * NODE_GAP) - totalWidth) / 2;
+
+          nodes.sort((a, b) => (a.id || '').localeCompare(b.id || ''));
+
+          for (const node of nodes) {
+            positioned.push({
+              ...node,
+              x: startX,
+              y: y,
+              w: NODE_W,
+              h: NODE_H,
+              level,
+            });
+            startX += NODE_W + NODE_GAP;
+          }
+        }
+
+        return positioned;
+      }
+
+      // ─── Render SVG ───
+      function render(graph) {
+        currentGraph = graph;
+        if (!graph || !graph.nodes || graph.nodes.length === 0) {
+          svg.style.display = 'none';
+          emptyState.style.display = 'flex';
+          stateBadge.textContent = 'idle';
+          stateBadge.className = 'state-badge state-idle';
+          return;
+        }
+
+        emptyState.style.display = 'none';
+        svg.style.display = 'block';
+
+        // Update state badge
+        const state = graph.currentState || 'idle';
+        stateBadge.textContent = state;
+        stateBadge.className = 'state-badge state-' + state;
+
+        const nodes = layoutGraph(graph);
+        if (nodes.length === 0) return;
+
+        // Calculate SVG dimensions
+        const maxX = Math.max(...nodes.map(n => n.x + n.w)) + PAD_X;
+        const maxY = Math.max(...nodes.map(n => n.y + n.h)) + PAD_Y;
+        svg.setAttribute('width', maxX);
+        svg.setAttribute('height', maxY);
+        svg.setAttribute('viewBox', `0 0 ${maxX} ${maxY}`);
+
+        // Build edge paths
+        let edgesHtml = '';
+        for (const edge of graph.edges || []) {
+          const fromNode = nodes.find(n => n.id === edge.from);
+          const toNode = nodes.find(n => n.id === edge.to);
+          if (!fromNode || !toNode) continue;
+
+          const x1 = fromNode.x + fromNode.w / 2;
+          const y1 = fromNode.y + fromNode.h;
+          const x2 = toNode.x + toNode.w / 2;
+          const y2 = toNode.y;
+          const midY = (y1 + y2) / 2;
+          const ctrlY1 = y1 + (midY - y1) * 0.6;
+          const ctrlY2 = y2 - (y2 - midY) * 0.6;
+
+          edgesHtml += `
+            <path d="M ${x1} ${y1} C ${x1} ${ctrlY1}, ${x2} ${ctrlY2}, ${x2} ${y2}"
+                  fill="none" stroke="#313244" stroke-width="2" marker-end="url(#arrow)"/>
+          `;
+
+          // Edge label
+          if (edge.label) {
+            edgesHtml += `
+              <text x="${(x1 + x2) / 2}" y="${midY - 4}"
+                    fill="#6c7086" font-size="10" text-anchor="middle"
+                    font-family="sans-serif">${escapeHtml(edge.label)}</text>
+            `;
+          }
+        }
+
+        // Build node rects
+        let nodesHtml = '';
+        for (const node of nodes) {
+          const colors = STATUS_COLORS[node.status] || STATUS_COLORS.pending;
+          const typeFill = TYPE_FILLS[node.type] || '#252536';
+          const icon = TYPE_ICONS[node.type] || '●';
+
+          let progressHtml = '';
+          if (node.status === 'running' && node.progress !== undefined) {
+            progressHtml = `
+              <rect x="${node.x}" y="${node.y + node.h - 4}"
+                    width="${node.w * (node.progress / 100)}" height="4"
+                    fill="${colors.text}" rx="2" opacity="0.6"/>
+            `;
+          }
+
+          nodesHtml += `
+            <g class="graph-node" data-id="${node.id}"
+               onmouseover="showTooltip(event, '${node.id}')"
+               onmouseout="hideTooltip()"
+               style="cursor:pointer">
+              <rect x="${node.x}" y="${node.y}" width="${node.w}" height="${node.h}"
+                    rx="${RADIUS}" ry="${RADIUS}"
+                    fill="${typeFill}" stroke="${colors.stroke}" stroke-width="2"
+                    opacity="${node.status === 'pending' ? 0.6 : 1}"/>
+              ${progressHtml}
+              <text x="${node.x + 14}" y="${node.y + 24}"
+                    font-size="18">${icon}</text>
+              <text x="${node.x + 44}" y="${node.y + 22}"
+                    fill="${colors.text}" font-size="13" font-weight="600"
+                    font-family="sans-serif">${escapeHtml(node.label)}</text>
+              <text x="${node.x + 44}" y="${node.y + 40}"
+                    fill="${node.status === 'running' ? colors.text : '#6c7086'}"
+                    font-size="11" font-family="sans-serif">
+                ${node.status === 'running' ? '● running' :
+                  node.status === 'completed' ? '✓ done' :
+                  node.status === 'failed' ? '✗ failed' :
+                  '○ pending'}
+              </text>
+              ${node.progress !== undefined && node.status === 'running' ? `
+              <text x="${node.x + node.w - 12}" y="${node.y + 22}"
+                    fill="${colors.text}" font-size="11" text-anchor="end"
+                    font-family="sans-serif">${node.progress}%</text>
+              ` : ''}
+            </g>
+          `;
+        }
+
+        // Arrow marker def
+        svg.innerHTML = `
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5"
+                    markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#313244"/>
+            </marker>
+          </defs>
+          ${edgesHtml}
+          ${nodesHtml}
+        `;
+      }
+
+      // ─── Tooltip ───
+      window.showTooltip = function(event, nodeId) {
+        if (!currentGraph) return;
+        const node = currentGraph.nodes.find(n => n.id === nodeId);
+        if (!node) return;
+
+        tooltip.innerHTML = `
+          <div class="tt-label">${escapeHtml(node.label)}</div>
+          ${node.description ? `<div class="tt-desc">${escapeHtml(node.description)}</div>` : ''}
+          <div class="tt-status">Status: <strong>${node.status}</strong></div>
+          ${node.result ? `<div class="tt-result">${escapeHtml(node.result)}</div>` : ''}
+          ${node.details ? `<div class="tt-result">${escapeHtml(node.details)}</div>` : ''}
+        `;
+        tooltip.className = 'tooltip visible';
+
+        const rect = tooltip.getBoundingClientRect();
+        let tx = event.clientX + 10;
+        let ty = event.clientY + 10;
+        if (tx + rect.width > window.innerWidth) tx = event.clientX - rect.width - 10;
+        if (ty + rect.height > window.innerHeight) ty = event.clientY - rect.height - 10;
+        tooltip.style.left = tx + 'px';
+        tooltip.style.top = ty + 'px';
+      };
+
+      window.hideTooltip = function() {
+        tooltip.className = 'tooltip';
+      };
+
+      function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+      }
+
+      // ─── Reset ───
+      document.getElementById('reset-btn').addEventListener('click', () => {
+        vscode.postMessage({ type: 'resetGraph' });
+      });
+
+      // ─── Handle messages ───
+      window.addEventListener('message', (event) => {
+        const msg = event.data;
+        switch (msg.type) {
+          case 'renderGraph':
+            render(msg.graph);
+            break;
+          case 'updateNode':
+            if (currentGraph) {
+              const node = currentGraph.nodes.find(n => n.id === msg.nodeId);
+              if (node) {
+                Object.assign(node, msg.updates);
+                render(currentGraph);
+              }
+            }
+            break;
+          case 'setGraphState':
+            if (currentGraph) {
+              currentGraph.currentState = msg.state;
+              render(currentGraph);
+            }
+            break;
+        }
+      });
+
+      // ─── Ready ───
+      vscode.postMessage({ type: 'graphReady' });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#89b4fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Circuit board base -->
+  <rect x="2" y="2" width="20" height="20" rx="3" stroke="#89b4fa" fill="none"/>
+  <!-- Traces -->
+  <path d="M6 8h4l2-3 2 3h4" stroke="#89b4fa" fill="none"/>
+  <path d="M6 16h12" stroke="#89b4fa" fill="none"/>
+  <path d="M8 8v8" stroke="#89b4fa" fill="none"/>
+  <path d="M16 8v8" stroke="#89b4fa" fill="none"/>
+  <!-- Nodes -->
+  <circle cx="6" cy="8" r="1.5" fill="#89b4fa"/>
+  <circle cx="18" cy="8" r="1.5" fill="#89b4fa"/>
+  <circle cx="6" cy="16" r="1.5" fill="#89b4fa"/>
+  <circle cx="18" cy="16" r="1.5" fill="#89b4fa"/>
+  <!-- Sparkle (AI indicator) -->
+  <path d="M12 2l.5 1.5L14 4l-1.5.5L12 6l-.5-1.5L10 4l1.5-.5z" fill="#f9e2af" stroke="none"/>
+</svg>

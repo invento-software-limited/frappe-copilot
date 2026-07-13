@@ -1,0 +1,25 @@
+# Output / Build
+out/
+*.js.map
+*.tsbuildinfo
+
+# Dependencies
+node_modules/
+
+# VS Code
+.vscode-test/
+*.vsix
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frappe Copilot workspace (user-specific)
+.frappe-copilot/config.json
+.frappe-copilot/sessions/
+.frappe-copilot/agents/
+.frappe-copilot/docs/
+.frappe-copilot/vector_store.json
+
+# Claude AI workspace (local settings + plans)
+.claude/

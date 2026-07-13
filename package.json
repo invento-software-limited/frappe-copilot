@@ -1,0 +1,215 @@
+{
+  "name": "frappe-copilot",
+  "displayName": "Frappe Copilot",
+  "description": "AI-powered Frappe/ERPNext development assistant. Integrates with OpenCode Zen for agentic code generation, bench management, and Frappe app scaffolding.",
+  "version": "0.1.0",
+  "publisher": "frappe-copilot",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "frappe",
+    "erpnext",
+    "bench",
+    "ai",
+    "opencode",
+    "copilot"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "frappe-copilot.start",
+        "title": "Frappe Copilot: Open Chat"
+      },
+      {
+        "command": "frappe-copilot.setupBench",
+        "title": "Frappe Copilot: Configure Bench Environment"
+      },
+      {
+        "command": "frappe-copilot.setupApiKey",
+        "title": "Frappe Copilot: Set API Key"
+      },
+      {
+        "command": "frappe-copilot.newSession",
+        "title": "Frappe Copilot: New Session"
+      },
+      {
+        "command": "frappe-copilot.runBenchCommand",
+        "title": "Frappe Copilot: Run Bench Command..."
+      },
+      {
+        "command": "frappe-copilot.showConfig",
+        "title": "Frappe Copilot: Show Configuration"
+      },
+      {
+        "command": "frappe-copilot.mentionCode",
+        "title": "Frappe Copilot: Mention Selected Code"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "frappe-copilot",
+          "title": "Frappe Copilot",
+          "icon": "assets/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "frappe-copilot": [
+        {
+          "type": "tree",
+          "id": "frappe-copilot.sessions",
+          "name": "Sessions"
+        },
+        {
+          "type": "tree",
+          "id": "frappe-copilot.benchCommands",
+          "name": "Bench Commands"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Frappe Copilot",
+      "properties": {
+        "frappe-copilot.provider": {
+          "type": "string",
+          "default": "opencode-zen",
+          "enum": [
+            "opencode-zen",
+            "openai",
+            "anthropic"
+          ],
+          "enumDescriptions": [
+            "OpenCode Zen Proxy API",
+            "OpenAI API (direct)",
+            "Anthropic Claude API (direct)"
+          ],
+          "description": "LLM provider to use for chat and code generation"
+        },
+        "frappe-copilot.opencodeZen.endpoint": {
+          "type": "string",
+          "default": "https://opencode.ai/zen/v1",
+          "description": "OpenCode Zen API endpoint URL"
+        },
+        "frappe-copilot.opencodeZen.model": {
+          "type": "string",
+          "default": "deepseek-v4-flash-free",
+          "description": "Default model to use with OpenCode Zen",
+          "enum": [
+            "deepseek-v4-flash-free",
+            "deepseek-coder",
+            "deepseek-v3",
+            "qwen2.5-coder-7b",
+            "qwen2.5-coder-32b",
+            "codellama-7b",
+            "codellama-13b",
+            "codellama-34b",
+            "claude-sonnet-4-8",
+            "claude-opus-4-8",
+            "gpt-4o",
+            "gpt-4o-mini"
+          ],
+          "editPresentation": "dropdown"
+        },
+        "frappe-copilot.opencodeZen.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "description": "Temperature for LLM responses (0.0 - 1.0)",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "frappe-copilot.openai.endpoint": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "OpenAI API endpoint URL"
+        },
+        "frappe-copilot.openai.model": {
+          "type": "string",
+          "default": "gpt-4o",
+          "description": "Default model to use with OpenAI",
+          "enum": [
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4-turbo"
+          ],
+          "editPresentation": "dropdown"
+        },
+        "frappe-copilot.openai.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "description": "Temperature for LLM responses (0.0 - 1.0)",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "frappe-copilot.anthropic.endpoint": {
+          "type": "string",
+          "default": "https://api.anthropic.com/v1",
+          "description": "Anthropic API endpoint URL"
+        },
+        "frappe-copilot.anthropic.model": {
+          "type": "string",
+          "default": "claude-3-5-sonnet-latest",
+          "description": "Default model to use with Anthropic",
+          "enum": [
+            "claude-3-5-sonnet-latest",
+            "claude-3-5-haiku-latest",
+            "claude-3-opus-latest"
+          ],
+          "editPresentation": "dropdown"
+        },
+        "frappe-copilot.anthropic.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "description": "Temperature for LLM responses (0.0 - 1.0)",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "frappe-copilot.mentionCode",
+        "key": "ctrl+alt+m",
+        "mac": "cmd+alt+m",
+        "when": "editorHasSelection"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "frappe-copilot.newSession",
+          "when": "view == frappe-copilot.sessions",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "frappe-copilot.mentionCode",
+          "when": "editorHasSelection",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^4.0.379"
+  }
+}
