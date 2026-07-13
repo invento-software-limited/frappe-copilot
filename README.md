@@ -5,6 +5,7 @@ Integrates with **OpenCode Zen**, **OpenAI**, and **Anthropic** to help you buil
 customize, and debug Frappe applications faster — with agentic code generation,
 live bench command execution, and a visual workflow graph.
 
+
 ## Features
 
 - **💬 AI Chat with Streaming** — Conversational Frappe/ERPNext assistant with real-time streaming responses
