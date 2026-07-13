@@ -39,12 +39,15 @@ Choose one of the following methods:
 
 > **Note:** The marketplace listing is coming soon. Until then, use Option B or C.
 
-#### Option B: Install from VSIX file
+#### Option B: Install from VSIX file (recommended until marketplace is live)
 
-1. Download the latest `.vsix` from the [Releases page](https://github.com/invento-software-limited/frappe-copilot/releases)
-2. In VS Code, press **Ctrl+Shift+P** (or **Cmd+Shift+P**) to open the Command Palette
-3. Run **Extensions: Install from VSIX...**
-4. Select the downloaded `.vsix` file
+The VSIX package is automatically built by GitHub Actions whenever a new version tag is pushed.
+
+1. Go to the [Releases page](https://github.com/invento-software-limited/frappe-copilot/releases)
+2. Download the latest `frappe-copilot-v*.vsix` asset
+3. In VS Code, press **Ctrl+Shift+P** (or **Cmd+Shift+P**) to open the Command Palette
+4. Run **Extensions: Install from VSIX...**
+5. Select the downloaded `.vsix` file
 
 #### Option C: Build from source
 
