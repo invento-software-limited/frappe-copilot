@@ -84,12 +84,14 @@
           "enum": [
             "opencode-zen",
             "openai",
-            "anthropic"
+            "anthropic",
+            "claude-code"
           ],
           "enumDescriptions": [
             "OpenCode Zen Proxy API",
             "OpenAI API (direct)",
-            "Anthropic Claude API (direct)"
+            "Anthropic Claude API (direct, manual API key or OAuth login)",
+            "Claude Code (official @anthropic-ai/claude-agent-sdk — same login/API mechanism as the Claude Code VS Code extension; no key entry needed)"
           ],
           "description": "LLM provider to use for chat and code generation"
         },
@@ -155,9 +157,13 @@
         },
         "frappe-copilot.anthropic.model": {
           "type": "string",
-          "default": "claude-3-5-sonnet-latest",
+          "default": "claude-sonnet-5",
           "description": "Default model to use with Anthropic",
           "enum": [
+            "claude-sonnet-5",
+            "claude-opus-4-8",
+            "claude-haiku-4-5-20251001",
+            "claude-fable-5",
             "claude-3-5-sonnet-latest",
             "claude-3-5-haiku-latest",
             "claude-3-opus-latest"
@@ -170,6 +176,34 @@
           "description": "Temperature for LLM responses (0.0 - 1.0)",
           "minimum": 0,
           "maximum": 1
+        },
+        "frappe-copilot.anthropic.extendedThinking": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Claude extended thinking. Thinking output is shown in a separate collapsible 'Thought Process' section instead of the main reply."
+        },
+        "frappe-copilot.anthropic.thinkingBudgetTokens": {
+          "type": "number",
+          "default": 10000,
+          "description": "Token budget for Claude extended thinking (only used when extendedThinking is enabled).",
+          "minimum": 1024
+        },
+        "frappe-copilot.claudeCode.model": {
+          "type": "string",
+          "default": "claude-sonnet-5",
+          "description": "Default model to use with the Claude Code provider",
+          "enum": [
+            "claude-sonnet-5",
+            "claude-opus-4-8",
+            "claude-haiku-4-5-20251001",
+            "claude-fable-5"
+          ],
+          "editPresentation": "dropdown"
+        },
+        "frappe-copilot.claudeCode.extendedThinking": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable Claude extended (adaptive) thinking. Thinking output is shown in a separate collapsible 'Thought Process' section instead of the main reply."
         }
       }
     },
@@ -210,6 +244,7 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.208",
     "pdfjs-dist": "^4.0.379"
   }
 }

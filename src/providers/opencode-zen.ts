@@ -121,7 +121,7 @@ export class OpenCodeZenProvider implements LLMProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(300000),
     });
 
     if (!response.ok) {
@@ -172,7 +172,7 @@ export class OpenCodeZenProvider implements LLMProvider {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
-          signal: abortSignal || AbortSignal.timeout(30000),
+          signal: abortSignal || AbortSignal.timeout(300000),
         });
       } catch (e: any) {
         lastError = e;
@@ -260,33 +260,6 @@ export class OpenCodeZenProvider implements LLMProvider {
     } catch {
       return false;
     }
-  }
-
-  async getEmbeddings(text: string): Promise<number[]> {
-    const url = `${this.endpoint}/embeddings`;
-    const headers = await this.buildHeaders();
-    const body = {
-      model: 'text-embedding-3-small',
-      input: text,
-    };
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15000),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error');
-      throw new Error(`OpenCode Zen Embeddings API error (${response.status}): ${errorText}`);
-    }
-
-    const data = (await response.json()) as any;
-    if (data && data.data && data.data[0] && data.data[0].embedding) {
-      return data.data[0].embedding;
-    }
-    throw new Error('Malformed embeddings response from OpenCode Zen');
   }
 
   async getModels(): Promise<string[]> {

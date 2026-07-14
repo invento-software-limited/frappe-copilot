@@ -599,6 +599,38 @@ tr:nth-child(even) {
   from { opacity: 0; transform: scale(0.95) translateY(10px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
+#btn-oauth-continue {
+  background: #8f4633;
+  color: #ffffff;
+  border: none;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.15s ease;
+}
+#btn-oauth-continue:hover {
+  background: #a2523d;
+}
+#btn-oauth-back {
+  background: transparent;
+  color: #888;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+#btn-oauth-back:hover {
+  border-color: #666;
+  color: #cccccc;
+}
+#btn-copy-oauth-url:hover {
+  background: #4a4a4a !important;
+  color: #ffffff !important;
+}
 </style>
 </head>
 <body>
@@ -645,32 +677,55 @@ window.onerror = function(message, source, lineno, colno, error) {
 </div>
 <div id="settings-panel" style="display:none; background:var(--vscode-sideBar-background,#252526); border-bottom:1px solid var(--vscode-widget-border,#404040); padding:12px 16px; flex-direction:column; gap:10px;">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
-    <span style="font-size:12px; font-weight:600; color:var(--vscode-editor-foreground,#d4d4d4);">⚙️ Connection Settings</span>
+    <span id="settings-title" style="font-size:12px; font-weight:600; color:var(--vscode-editor-foreground,#d4d4d4);">⚙️ Connection Settings</span>
     <button id="btn-close-settings" style="background:none; border:none; color:var(--vscode-descriptionForeground,#888); cursor:pointer; font-size:14px; padding:0; line-height:1;">✕</button>
   </div>
-  <div style="display:flex; flex-direction:column; gap:4px;">
-    <label style="font-size:10px; color:var(--vscode-descriptionForeground,#888); text-transform:uppercase; letter-spacing:0.4px;">API Provider</label>
-    <select id="provider-select" style="background:var(--vscode-input-background,#3c3c3c); color:var(--vscode-input-foreground,#d4d4d4); border:1px solid var(--vscode-input-border,#555); border-radius:4px; padding:5px 8px; font-size:12px; outline:none; cursor:pointer; font-family:inherit;">
-      <option value="opencode-zen">OpenCode Zen Proxy</option>
-      <option value="openai">OpenAI (direct)</option>
-      <option value="anthropic">Anthropic Claude (direct)</option>
-    </select>
-  </div>
-  <div style="display:flex; flex-direction:column; gap:4px;">
-    <label style="font-size:10px; color:var(--vscode-descriptionForeground,#888); text-transform:uppercase; letter-spacing:0.4px;">API Key</label>
-    <div style="display:flex; gap:6px;">
-      <input id="api-key-input" type="password" placeholder="API key value..." style="flex:1; background:var(--vscode-input-background,#3c3c3c); color:var(--vscode-input-foreground,#d4d4d4); border:1px solid var(--vscode-input-border,#555); border-radius:4px; padding:5px 8px; font-size:12px; font-family:var(--vscode-editor-font-family,monospace); outline:none;"/>
-      <button id="btn-save-key" style="background:var(--vscode-button-background,#0e639c); color:var(--vscode-button-foreground,#fff); border:none; border-radius:4px; padding:5px 10px; font-size:11px; cursor:pointer; white-space:nowrap; font-family:inherit;">Save Key</button>
+  <div id="settings-inputs-container" style="display:flex; flex-direction:column; gap:10px;">
+    <div style="display:flex; flex-direction:column; gap:4px;">
+      <label style="font-size:10px; color:var(--vscode-descriptionForeground,#888); text-transform:uppercase; letter-spacing:0.4px;">API Provider</label>
+      <select id="provider-select" style="background:var(--vscode-input-background,#3c3c3c); color:var(--vscode-input-foreground,#d4d4d4); border:1px solid var(--vscode-input-border,#555); border-radius:4px; padding:5px 8px; font-size:12px; outline:none; cursor:pointer; font-family:inherit;">
+        <option value="opencode-zen">OpenCode Zen Proxy</option>
+        <option value="openai">OpenAI (direct)</option>
+        <option value="anthropic">Anthropic Claude (direct)</option>
+        <option value="claude-code">Claude Code (auto login)</option>
+      </select>
+    </div>
+    <div id="api-key-row" style="display:flex; flex-direction:column; gap:4px;">
+      <label style="font-size:10px; color:var(--vscode-descriptionForeground,#888); text-transform:uppercase; letter-spacing:0.4px;">API Key</label>
+      <div style="display:flex; gap:6px;">
+        <input id="api-key-input" type="password" placeholder="API key value..." style="flex:1; background:var(--vscode-input-background,#3c3c3c); color:var(--vscode-input-foreground,#d4d4d4); border:1px solid var(--vscode-input-border,#555); border-radius:4px; padding:5px 8px; font-size:12px; font-family:var(--vscode-editor-font-family,monospace); outline:none;"/>
+        <button id="btn-save-key" style="background:var(--vscode-button-background,#0e639c); color:var(--vscode-button-foreground,#fff); border:none; border-radius:4px; padding:5px 10px; font-size:11px; cursor:pointer; white-space:nowrap; font-family:inherit;">Save Key</button>
+        <button id="btn-oauth-login" style="display:none; background:var(--vscode-button-background,#0e639c); color:var(--vscode-button-foreground,#fff); border:none; border-radius:4px; padding:5px 10px; font-size:11px; cursor:pointer; white-space:nowrap; font-family:inherit;">Login with Claude</button>
+      </div>
+    </div>
+    <div id="endpoint-row" style="display:flex; flex-direction:column; gap:4px;">
+      <label style="font-size:10px; color:var(--vscode-descriptionForeground,#888); text-transform:uppercase; letter-spacing:0.4px;">Endpoint URL</label>
+      <div style="display:flex; gap:6px;">
+        <input id="endpoint-input" type="text" placeholder="Endpoint URL..." style="flex:1; background:var(--vscode-input-background,#3c3c3c); color:var(--vscode-input-foreground,#d4d4d4); border:1px solid var(--vscode-input-border,#555); border-radius:4px; padding:5px 8px; font-size:12px; font-family:inherit; outline:none;"/>
+        <button id="btn-save-endpoint" style="background:var(--vscode-button-background,#0e639c); color:var(--vscode-button-foreground,#fff); border:none; border-radius:4px; padding:5px 10px; font-size:11px; cursor:pointer; white-space:nowrap; font-family:inherit;">Save</button>
+      </div>
+    </div>
+    <div id="claude-code-note" style="display:none; font-size:11px; color:var(--vscode-descriptionForeground,#888); line-height:1.5; background:var(--vscode-textBlockQuote-background,rgba(255,255,255,0.04)); border-left:2px solid var(--vscode-textLink-foreground,#3794ff); padding:8px 10px; border-radius:2px;">
+      Uses the official Claude Agent SDK — the same login and API mechanism as the Claude Code VS Code extension. No key entry needed: it automatically picks up your existing <code>claude</code> login (OAuth or API key). If you haven't logged in yet, run <code>claude</code> in a terminal once and complete login.
     </div>
   </div>
-  <div style="display:flex; flex-direction:column; gap:4px;">
-    <label style="font-size:10px; color:var(--vscode-descriptionForeground,#888); text-transform:uppercase; letter-spacing:0.4px;">Endpoint URL</label>
-    <div style="display:flex; gap:6px;">
-      <input id="endpoint-input" type="text" placeholder="Endpoint URL..." style="flex:1; background:var(--vscode-input-background,#3c3c3c); color:var(--vscode-input-foreground,#d4d4d4); border:1px solid var(--vscode-input-border,#555); border-radius:4px; padding:5px 8px; font-size:12px; font-family:inherit; outline:none;"/>
-      <button id="btn-save-endpoint" style="background:var(--vscode-button-background,#0e639c); color:var(--vscode-button-foreground,#fff); border:none; border-radius:4px; padding:5px 10px; font-size:11px; cursor:pointer; white-space:nowrap; font-family:inherit;">Save</button>
+  <div id="claude-oauth-container" style="display:none; flex-direction:column; gap:12px; padding:4px 0;">
+    <div style="font-size:14px; font-weight:600; color:#ffffff; margin-bottom:2px;">Continue in browser</div>
+    <div style="font-size:11px; color:#888; line-height:1.4;">If the browser didn't open, visit this URL:</div>
+    <div style="display:flex; gap:6px; align-items:center;">
+      <input id="oauth-url-input" type="text" readonly style="flex:1; background:#2d2d2d; color:#cccccc; border:1px solid #444; border-radius:4px; padding:6px 10px; font-size:11px; outline:none; font-family:var(--vscode-editor-font-family,monospace);"/>
+      <button id="btn-copy-oauth-url" class="btn" style="background:#3a3a3a; border:1px solid #555; color:#d4d4d4; width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; border-radius:4px; cursor:pointer;" title="Copy URL">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M4 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 1a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1H4zm3-2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-1.15 1.81l-.64-.77A1 1 0 0 0 15 13V4a1 1 0 0 0-1-1H7a1 1 0 0 0-1 .85l-.77-.64A2 2 0 0 1 7 1z"/></svg>
+      </button>
+    </div>
+    <div style="font-size:11px; color:#888; margin-top:2px;">Or, paste your authorization code manually:</div>
+    <input id="oauth-code-input" type="text" placeholder="012345" style="background:#2d2d2d; color:#ffffff; border:1px solid #444; border-radius:4px; padding:8px 12px; font-size:12px; outline:none; font-family:var(--vscode-editor-font-family,monospace);"/>
+    <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
+      <button id="btn-oauth-continue" style="background:#8f4633; color:#ffffff; border:none; border-radius:4px; padding:8px 16px; font-size:12px; cursor:pointer; font-weight:600; transition:background 0.15s ease;">Continue</button>
+      <button id="btn-oauth-back" style="background:transparent; color:#888; border:1px solid #444; border-radius:4px; padding:8px 16px; font-size:12px; cursor:pointer; transition:all 0.15s ease;">Back</button>
     </div>
   </div>
-  <div id="settings-status" style="font-size:11px; color:var(--vscode-descriptionForeground,#888); min-height:14px;"></div>
+  <div id="settings-status" style="font-size:11px; color:var(--vscode-descriptionForeground,#888); min-height:14px; margin-top:2px;"></div>
 </div>
 <div id="todo-panel" class="graph-panel" style="display:none;">
   <div class="graph-hdr">
@@ -1048,8 +1103,30 @@ window.onerror = function(message, source, lineno, colno, error) {
       vs.postMessage({ type: 'getSettings' });
     }
   };
+  function resetOAuthView() {
+    var oauthContainer = document.getElementById('claude-oauth-container');
+    var inputsContainer = document.getElementById('settings-inputs-container');
+    var titleEl = document.getElementById('settings-title');
+    if (oauthContainer) oauthContainer.style.display = 'none';
+    if (inputsContainer) inputsContainer.style.display = 'flex';
+    if (titleEl) titleEl.textContent = '⚙️ Connection Settings';
+    var codeInput = document.getElementById('oauth-code-input');
+    var urlInput = document.getElementById('oauth-url-input');
+    if (codeInput) codeInput.value = '';
+    if (urlInput) urlInput.value = '';
+  }
+
+  function cancelClaudeOAuth() {
+    var oauthContainer = document.getElementById('claude-oauth-container');
+    if (oauthContainer && oauthContainer.style.display === 'flex') {
+      vs.postMessage({ type: 'cancelClaudeOAuth' });
+      resetOAuthView();
+    }
+  }
+
   document.getElementById('btn-close-settings').onclick = function() {
     settingsPanel.style.display = 'none';
+    cancelClaudeOAuth();
   };
   document.getElementById('btn-save-key').onclick = function() {
     var key = document.getElementById('api-key-input').value.trim();
@@ -1058,14 +1135,69 @@ window.onerror = function(message, source, lineno, colno, error) {
     settingsStatus.style.color = 'var(--vscode-descriptionForeground,#888)';
     vs.postMessage({ type: 'setApiKey', key: key });
   };
+  document.getElementById('btn-oauth-login').onclick = function() {
+    settingsStatus.textContent = '⏳ Starting Claude OAuth flow...';
+    settingsStatus.style.color = 'var(--vscode-descriptionForeground,#888)';
+    vs.postMessage({ type: 'startClaudeOAuth' });
+  };
+  document.getElementById('btn-oauth-continue').onclick = function() {
+    var codeInput = document.getElementById('oauth-code-input');
+    var code = codeInput ? codeInput.value.trim() : '';
+    if (!code) {
+      settingsStatus.textContent = '⚠️ Please enter the authorization code.';
+      settingsStatus.style.color = '#f14c4c';
+      return;
+    }
+    settingsStatus.textContent = '⏳ Verifying authorization code...';
+    settingsStatus.style.color = 'var(--vscode-descriptionForeground,#888)';
+    vs.postMessage({ type: 'submitClaudeOAuthCode', code: code });
+  };
+  document.getElementById('btn-oauth-back').onclick = function() {
+    cancelClaudeOAuth();
+    settingsStatus.textContent = '';
+  };
+  document.getElementById('btn-copy-oauth-url').onclick = function() {
+    var urlInput = document.getElementById('oauth-url-input');
+    if (urlInput) {
+      navigator.clipboard.writeText(urlInput.value).then(function() {
+        var copyBtn = document.getElementById('btn-copy-oauth-url');
+        var originalSvg = copyBtn.innerHTML;
+        copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="color:var(--vscode-testing-iconPassed,#4ec9b0);"><path fill-rule="evenodd" clip-rule="evenodd" d="M14.431 3.323a.5.5 0 0 1 .144.696l-7.5 11a.5.5 0 0 1-.762.08l-4-4a.5.5 0 0 1 .707-.708l3.56 3.56 7.155-10.492a.5.5 0 0 1 .696-.136z"/></svg>';
+        setTimeout(function() {
+          copyBtn.innerHTML = originalSvg;
+        }, 2000);
+      }).catch(function() {
+        settingsStatus.textContent = '❌ Failed to copy URL.';
+        settingsStatus.style.color = '#f14c4c';
+      });
+    }
+  };
   document.getElementById('btn-save-endpoint').onclick = function() {
     var ep = document.getElementById('endpoint-input').value.trim();
     if (!ep) { settingsStatus.textContent = '⚠️ Please enter an endpoint URL.'; settingsStatus.style.color = '#f14c4c'; return; }
     settingsStatus.textContent = '⏳ Saving...';
     vs.postMessage({ type: 'setEndpoint', endpoint: ep });
   };
+  function updateProviderUi(providerId) {
+    var oauthBtn = document.getElementById('btn-oauth-login');
+    var apiKeyRow = document.getElementById('api-key-row');
+    var endpointRow = document.getElementById('endpoint-row');
+    var claudeCodeNote = document.getElementById('claude-code-note');
+    if (providerId === 'claude-code') {
+      apiKeyRow.style.display = 'none';
+      endpointRow.style.display = 'none';
+      claudeCodeNote.style.display = 'block';
+      oauthBtn.style.display = 'none';
+    } else {
+      apiKeyRow.style.display = 'flex';
+      endpointRow.style.display = 'flex';
+      claudeCodeNote.style.display = 'none';
+      oauthBtn.style.display = providerId === 'anthropic' ? 'inline-block' : 'none';
+    }
+  }
   providerSelect.onchange = function() {
     settingsStatus.textContent = '⏳ Switching provider...';
+    updateProviderUi(providerSelect.value);
     vs.postMessage({ type: 'setProvider', provider: providerSelect.value });
   };
   modelSelect.onchange = function() {
@@ -1752,6 +1884,7 @@ window.onerror = function(message, source, lineno, colno, error) {
           providerSelect.value = m.provider;
         }
         var keyInput = document.getElementById('api-key-input');
+        updateProviderUi(m.provider);
         if (m.provider === 'openai') {
           keyInput.placeholder = 'sk-proj-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
         } else if (m.provider === 'anthropic') {
@@ -1759,14 +1892,44 @@ window.onerror = function(message, source, lineno, colno, error) {
         } else {
           keyInput.placeholder = 'oc-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
         }
-        settingsStatus.textContent = m.hasKey ? '✓ API key is set' : '⚠️ No API key — please set one above.';
+        if (m.provider === 'claude-code') {
+          settingsStatus.textContent = m.hasKey
+            ? '✓ Connected via Claude Code SDK (uses your existing claude login automatically)'
+            : '⚠️ Claude Code SDK not available — run `claude` in a terminal once to log in.';
+        } else if (m.hasKey && m.authMode === 'oauth') {
+          settingsStatus.textContent = '✓ Signed in with Claude.ai (Pro/Max subscription) — shares rate limits with Claude Code';
+        } else if (m.hasKey && m.authMode === 'api-key') {
+          settingsStatus.textContent = '✓ API key is set';
+        } else {
+          settingsStatus.textContent = m.hasKey ? '✓ API key is set' : '⚠️ No API key — please set one above.';
+        }
         settingsStatus.style.color = m.hasKey ? 'var(--vscode-testing-iconPassed,#4ec9b0)' : '#f14c4c';
+        break;
+      case 'claudeOAuthStarted':
+        var inputsContainer = document.getElementById('settings-inputs-container');
+        var oauthContainer = document.getElementById('claude-oauth-container');
+        var settingsTitle = document.getElementById('settings-title');
+        var urlInput = document.getElementById('oauth-url-input');
+        var codeInput = document.getElementById('oauth-code-input');
+        
+        if (inputsContainer) inputsContainer.style.display = 'none';
+        if (oauthContainer) oauthContainer.style.display = 'flex';
+        if (settingsTitle) settingsTitle.textContent = '⚙️ Login with Claude';
+        if (urlInput) urlInput.value = m.authUrl || '';
+        if (codeInput) {
+          codeInput.value = '';
+          codeInput.focus();
+        }
+        settingsStatus.textContent = '⏳ Complete login in browser or paste authorization code.';
+        settingsStatus.style.color = 'var(--vscode-descriptionForeground,#888)';
         break;
       case 'apiKeyStatus':
         settingsStatus.textContent = m.ok ? '✓ ' + m.msg : '✗ ' + m.msg;
         settingsStatus.style.color = m.ok ? 'var(--vscode-testing-iconPassed,#4ec9b0)' : '#f14c4c';
         if (m.ok) {
-          document.getElementById('api-key-input').value = '';
+          var apiKeyInput = document.getElementById('api-key-input');
+          if (apiKeyInput) apiKeyInput.value = '';
+          resetOAuthView();
         }
         break;
       case 'todoListUpdated':

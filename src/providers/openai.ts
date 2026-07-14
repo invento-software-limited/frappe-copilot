@@ -73,7 +73,7 @@ export class OpenAIProvider implements LLMProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(300000),
     });
 
     if (!response.ok) {
@@ -121,7 +121,7 @@ export class OpenAIProvider implements LLMProvider {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
-          signal: abortSignal || AbortSignal.timeout(30000),
+          signal: abortSignal || AbortSignal.timeout(300000),
         });
       } catch (e: any) {
         lastError = e;

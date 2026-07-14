@@ -4,6 +4,7 @@ import { LLMProvider } from './interface';
 import { OpenCodeZenProvider } from './opencode-zen';
 import { OpenAIProvider } from './openai';
 import { AnthropicProvider } from './anthropic';
+import { ClaudeAgentSdkProvider } from './claudeAgentSdk';
 
 export class DynamicProvider implements LLMProvider {
   private activeProvider!: LLMProvider;
@@ -15,6 +16,7 @@ export class DynamicProvider implements LLMProvider {
     this.providers['opencode-zen'] = new OpenCodeZenProvider(secrets);
     this.providers['openai'] = new OpenAIProvider(secrets);
     this.providers['anthropic'] = new AnthropicProvider(secrets);
+    this.providers['claude-code'] = new ClaudeAgentSdkProvider();
     this.refreshConfig();
   }
 
@@ -41,6 +43,10 @@ export class DynamicProvider implements LLMProvider {
     return (this.activeProvider as any).clearApiKey();
   }
 
+  async getAuthMode(): Promise<'api-key' | 'oauth' | 'none'> {
+    return (await this.activeProvider.getAuthMode?.()) ?? 'none';
+  }
+
   chat(messages: Message[], options?: ChatOptions): Promise<ChatResponse> {
     return this.activeProvider.chat(messages, options);
   }
@@ -54,11 +60,10 @@ export class DynamicProvider implements LLMProvider {
   }
 
   getEmbeddings(text: string): Promise<number[]> {
-    if (this.activeProvider.getEmbeddings) {
-      return this.activeProvider.getEmbeddings(text);
+    if (!this.activeProvider.getEmbeddings) {
+      return Promise.reject(new Error(`${this.activeProvider.name} does not support embeddings.`));
     }
-    // Fallback to opencode-zen embeddings
-    return this.providers['opencode-zen'].getEmbeddings!(text);
+    return this.activeProvider.getEmbeddings(text);
   }
 
   async getModels(): Promise<string[]> {

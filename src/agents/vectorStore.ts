@@ -175,6 +175,7 @@ export class VectorStore {
       return scored.slice(0, limit).map(s => s.chunk);
     } catch (e) {
       console.warn('Embeddings search failed. Using keyword search fallback.', e);
+      this.isFallbackMode = true;
       return this.keywordSearch(query, limit);
     }
   }

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { LLMProvider } from '../providers/interface';
+import { runClaudeOAuthFlow } from '../providers/anthropicOAuth';
 import { SessionManager } from '../session/manager';
 import { BenchEnvironment, Session } from '../types';
 import { readIntakeFile } from '../intake/fileReader';
@@ -22,6 +23,7 @@ export class ChatPanel {
   private schemaMap: { doctypes: string[], apps: string[] } | null = null;
   private pendingApproval: { resolve: (approved: boolean) => void } | null = null;
   private pendingClarification: { resolve: (answers: string) => void } | null = null;
+  private pendingOAuthResolver: ((code: string) => void) | null = null;
   private activeModel: string = '';
   private todoList: any[] = [];
   private abortController: AbortController | null = null;
@@ -61,6 +63,23 @@ export class ChatPanel {
   }
 
   private async hasApiKey(): Promise<boolean> { try { return await (this.provider as any).hasApiKey(); } catch { return false; } }
+  /** 'api-key' | 'oauth' | 'none' | undefined — undefined when the active provider doesn't distinguish auth modes (e.g. OpenAI, OpenCode Zen). */
+  private async getAuthModeSafe(): Promise<string | undefined> {
+    try { return await (this.provider as any).getAuthMode?.(); } catch { return undefined; }
+  }
+  /** Claude Code has no direct endpoint — auth and routing are resolved by the SDK itself. */
+  private endpointForProvider(providerId: string): string {
+    switch (providerId) {
+      case 'openai':
+        return vscode.workspace.getConfiguration('frappe-copilot.openai').get<string>('endpoint', 'https://api.openai.com/v1');
+      case 'anthropic':
+        return vscode.workspace.getConfiguration('frappe-copilot.anthropic').get<string>('endpoint', 'https://api.anthropic.com/v1');
+      case 'claude-code':
+        return '';
+      default:
+        return vscode.workspace.getConfiguration('frappe-copilot.opencodeZen').get<string>('endpoint', 'https://opencode.ai/zen/v1');
+    }
+  }
   private say(type: string, data: any) { this.panel?.webview.postMessage({ type, ...(typeof data === 'object' ? data : { status: data }) }); }
   private chat(role: string, content: string) { this.say('addMessage', { message: { role, content } }); }
 
@@ -191,9 +210,64 @@ export class ChatPanel {
           this.say('apiKeyStatus', { ok: false, msg: 'API key cannot be empty.' });
         }
         break;
+      case 'startClaudeOAuth':
+        try {
+          const manualCodePromise = new Promise<string>((resolve) => {
+            this.pendingOAuthResolver = resolve;
+          });
+
+          const rawKey = await runClaudeOAuthFlow(
+            (authUrl) => {
+              this.say('claudeOAuthStarted', { authUrl });
+            },
+            manualCodePromise
+          );
+
+          if (rawKey) {
+            await (this.provider as any).setApiKey(rawKey);
+            this.say('apiKeyStatus', { ok: true, msg: 'OAuth login successful.' });
+            this.say('status', 'ready');
+            
+            // Reload settings to update UI state
+            const activeProviderId = vscode.workspace.getConfiguration('frappe-copilot').get<string>('provider', 'opencode-zen');
+            const currentEndpoint = this.endpointForProvider(activeProviderId);
+
+            this.say('settingsLoaded', {
+              hasKey: true,
+              endpoint: currentEndpoint,
+              provider: activeProviderId,
+              authMode: await this.getAuthModeSafe()
+            });
+
+            vscode.window.showInformationMessage('Frappe Copilot: Claude OAuth login successful!');
+          }
+        } catch (e: any) {
+          console.error('Claude OAuth flow failed:', e);
+          this.say('apiKeyStatus', { ok: false, msg: `Login failed: ${e.message || e}` });
+          vscode.window.showErrorMessage(`Claude OAuth login failed: ${e.message || e}`);
+        } finally {
+          this.pendingOAuthResolver = null;
+        }
+        break;
+      case 'submitClaudeOAuthCode':
+        if (this.pendingOAuthResolver && msg.code) {
+          this.pendingOAuthResolver(msg.code.trim());
+          this.pendingOAuthResolver = null;
+        }
+        break;
+      case 'cancelClaudeOAuth':
+        if (this.pendingOAuthResolver) {
+          this.pendingOAuthResolver('');
+          this.pendingOAuthResolver = null;
+        }
+        break;
       case 'setEndpoint':
         if (msg.endpoint && msg.endpoint.trim()) {
           const activeProviderId = vscode.workspace.getConfiguration('frappe-copilot').get<string>('provider', 'opencode-zen');
+          if (activeProviderId === 'claude-code') {
+            this.say('apiKeyStatus', { ok: true, msg: 'Claude Code resolves its own endpoint — nothing to save.' });
+            break;
+          }
           const section = activeProviderId === 'openai' ? 'frappe-copilot.openai' : activeProviderId === 'anthropic' ? 'frappe-copilot.anthropic' : 'frappe-copilot.opencodeZen';
           await vscode.workspace.getConfiguration(section).update('endpoint', msg.endpoint.trim(), vscode.ConfigurationTarget.Global);
           (this.provider as any).refreshConfig?.();
@@ -205,18 +279,12 @@ export class ChatPanel {
           await vscode.workspace.getConfiguration('frappe-copilot').update('provider', msg.provider, vscode.ConfigurationTarget.Global);
           (this.provider as any).refreshConfig?.();
           const hasKey = await (this.provider as any).hasApiKey?.();
-          let endpoint = '';
-          if (msg.provider === 'openai') {
-            endpoint = vscode.workspace.getConfiguration('frappe-copilot.openai').get<string>('endpoint', 'https://api.openai.com/v1');
-          } else if (msg.provider === 'anthropic') {
-            endpoint = vscode.workspace.getConfiguration('frappe-copilot.anthropic').get<string>('endpoint', 'https://api.anthropic.com/v1');
-          } else {
-            endpoint = vscode.workspace.getConfiguration('frappe-copilot.opencodeZen').get<string>('endpoint', 'https://opencode.ai/zen/v1');
-          }
+          const endpoint = this.endpointForProvider(msg.provider);
           this.say('settingsLoaded', {
             hasKey: !!hasKey,
             endpoint: endpoint,
-            provider: msg.provider
+            provider: msg.provider,
+            authMode: await this.getAuthModeSafe()
           });
           try {
             const models = this.provider.getModels ? await this.provider.getModels() : [];
@@ -228,26 +296,30 @@ export class ChatPanel {
       case 'getSettings':
         const activeProviderId = vscode.workspace.getConfiguration('frappe-copilot').get<string>('provider', 'opencode-zen');
         const hasKeyVal = await (this.provider as any).hasApiKey?.();
-        let currentEndpoint = '';
-        if (activeProviderId === 'openai') {
-          currentEndpoint = vscode.workspace.getConfiguration('frappe-copilot.openai').get<string>('endpoint', 'https://api.openai.com/v1');
-        } else if (activeProviderId === 'anthropic') {
-          currentEndpoint = vscode.workspace.getConfiguration('frappe-copilot.anthropic').get<string>('endpoint', 'https://api.anthropic.com/v1');
-        } else {
-          currentEndpoint = vscode.workspace.getConfiguration('frappe-copilot.opencodeZen').get<string>('endpoint', 'https://opencode.ai/zen/v1');
-        }
+        const currentEndpoint = this.endpointForProvider(activeProviderId);
         this.say('settingsLoaded', {
           hasKey: !!hasKeyVal,
           endpoint: currentEndpoint,
-          provider: activeProviderId
+          provider: activeProviderId,
+          authMode: await this.getAuthModeSafe()
         });
         break;
     }
   }
 
+  /** Message shown when the active provider has no usable credentials — worded
+   *  per-provider since Claude Code manages its own login outside this extension. */
+  private async noAuthMessage(): Promise<string> {
+    const providerId = vscode.workspace.getConfiguration('frappe-copilot').get<string>('provider', 'opencode-zen');
+    if (providerId === 'claude-code') {
+      return '⚠️ Claude Code SDK not available — run `claude` in a terminal once to log in, then try again.';
+    }
+    return '⚠️ Set your API key via Command Palette → Frappe Copilot: Set API Key';
+  }
+
   private async handleSend(text: string): Promise<void> {
     if (!(await this.hasApiKey())) {
-      this.chat('assistant', '⚠️ Set your API key via Command Palette → Frappe Copilot: Set API Key');
+      this.chat('assistant', await this.noAuthMessage());
       return;
     }
     if (this.isRunningAgent) {
@@ -260,7 +332,7 @@ export class ChatPanel {
   /** Send with file attachment: extract text, then send file content + user prompt to AI. */
   private async handleSendWithFile(msg: any): Promise<void> {
     if (!(await this.hasApiKey())) {
-      this.chat('assistant', '⚠️ Set your API key first.');
+      this.chat('assistant', await this.noAuthMessage());
       return;
     }
     if (this.isRunningAgent) {

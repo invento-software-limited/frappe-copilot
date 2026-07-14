@@ -23,4 +23,8 @@ export interface LLMProvider {
 
   /** Optional: Reload provider configuration from workspace settings. */
   refreshConfig?(): void;
+
+  /** Optional: Report which credential type is active — lets the UI show
+   *  whether requests are billed against an API key or a Claude.ai subscription. */
+  getAuthMode?(): Promise<'api-key' | 'oauth' | 'none'>;
 }
