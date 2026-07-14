@@ -14,6 +14,10 @@ interface VectorStoreData {
   chunks: TextChunk[];
 }
 
+/** Bump whenever the bundled assets/docs or assets/templates content changes, so
+ *  existing on-disk caches (which only rebuild when absent) pick up the update. */
+const INDEX_VERSION = '1.1';
+
 export class VectorStore {
   private storePath: string;
   private docsDir: string;
@@ -44,7 +48,12 @@ export class VectorStore {
       if (fs.existsSync(this.storePath)) {
         const raw = fs.readFileSync(this.storePath, 'utf-8');
         this.data = JSON.parse(raw) as VectorStoreData;
-        console.log(`Loaded ${this.data.chunks.length} cached chunks from vector store.`);
+        if (this.data.version !== INDEX_VERSION) {
+          console.log(`Vector store cache is version ${this.data.version}, expected ${INDEX_VERSION} — rebuilding.`);
+          await this.rebuildIndex();
+        } else {
+          console.log(`Loaded ${this.data.chunks.length} cached chunks from vector store.`);
+        }
       } else {
         await this.rebuildIndex();
       }
@@ -58,20 +67,21 @@ export class VectorStore {
   async rebuildIndex(): Promise<void> {
     try {
       console.log('Rebuilding vector index...');
+      this.data.version = INDEX_VERSION;
       this.data.chunks = [];
       const tempChunks: Omit<TextChunk, 'id'>[] = [];
 
-      // 1. Index documentation MD files
+      // 1. Index documentation MD files (recursively — assets/docs/skills/<name>/... nests SKILL.md + references)
       if (fs.existsSync(this.docsDir)) {
-        const files = fs.readdirSync(this.docsDir).filter(f => f.endsWith('.md'));
-        for (const file of files) {
-          const filePath = path.join(this.docsDir, file);
+        const files = this.findMarkdownFilesRecursive(this.docsDir);
+        for (const filePath of files) {
+          const relPath = path.relative(this.docsDir, filePath).split(path.sep).join('/');
           const content = fs.readFileSync(filePath, 'utf-8');
           const fileChunks = this.splitIntoChunks(content, 1000);
-          
+
           for (const text of fileChunks) {
             tempChunks.push({
-              source: `docs/${file}`,
+              source: `docs/${relPath}`,
               text: text.trim()
             });
           }
@@ -124,6 +134,21 @@ export class VectorStore {
     } catch (err) {
       console.error('Fatal error during vector index rebuild:', err);
     }
+  }
+
+  /** Recursively collect all .md files under a directory (used for assets/docs, which
+   *  nests skill folders like docs/skills/frappe-app-dev/references/*.md). */
+  private findMarkdownFilesRecursive(dir: string): string[] {
+    const results: string[] = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        results.push(...this.findMarkdownFilesRecursive(fullPath));
+      } else if (entry.isFile() && entry.name.endsWith('.md')) {
+        results.push(fullPath);
+      }
+    }
+    return results;
   }
 
   /** Split markdown file contents by double newlines or max character blocks. */
