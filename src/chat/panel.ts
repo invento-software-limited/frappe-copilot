@@ -84,7 +84,7 @@ export class ChatPanel {
   }
 
   private getWebviewContent(): string {
-    const p = path.join(this.extensionPath, 'src', 'chat', 'webview', 'chat.html');
+    const p = path.join(this.extensionPath, 'assets', 'webview', 'chat.html');
     try { if (fs.existsSync(p)) return fs.readFileSync(p, 'utf-8'); } catch { }
     return '<!DOCTYPE html><html><body><h1>Frappe Copilot</h1></body></html>';
   }
