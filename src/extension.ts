@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { DynamicProvider } from './providers/dynamic';
 import { BenchDetector } from './bench/detector';
 import { BenchExecutor } from './bench/executor';
@@ -7,6 +8,8 @@ import { initializeWorkspaceStructure, getFrappeCopilotPath, readConfig, updateB
 import { SessionManager } from './session/manager';
 import { ChatPanel } from './chat/panel';
 import { BenchEnvironment, BenchCommand } from './types';
+import { SkillsStore } from './agents/skillsStore';
+import { SkillsProvider } from './agents/skillsTreeProvider';
 
 // ─── Global state ─────────────────────────────────────────────────────────────
 
@@ -14,6 +17,8 @@ let provider: DynamicProvider;
 let benchDetector: BenchDetector;
 let benchExecutor: BenchExecutor | null = null;
 let sessionManager: SessionManager | null = null;
+let skillsStore: SkillsStore | null = null;
+let skillsProvider: SkillsProvider | null = null;
 let chatPanel: ChatPanel | null = null;
 let benchEnv: BenchEnvironment | null = null;
 let statusBarItem: vscode.StatusBarItem;
@@ -39,6 +44,9 @@ export function activate(context: vscode.ExtensionContext) {
   const frappeCopilotPath = initializeWorkspaceStructure();
   if (frappeCopilotPath) {
     sessionManager = new SessionManager(frappeCopilotPath);
+    skillsStore = new SkillsStore(frappeCopilotPath, path.join(extensionPath, 'assets', 'skills'));
+    skillsStore.migrateLegacyMemoryIfNeeded();
+    skillsProvider = new SkillsProvider(skillsStore);
   }
 
   // Create status bar item (must be before any updateStatusBar calls)
@@ -70,6 +78,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerTreeDataProvider(
       'frappe-copilot.sessions',
       sessionManager
+    );
+  }
+  if (skillsProvider) {
+    vscode.window.registerTreeDataProvider(
+      'frappe-copilot.skills',
+      skillsProvider
     );
   }
 
@@ -162,6 +176,24 @@ function registerCommands(context: vscode.ExtensionContext) {
         }
       }
     )
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.newSkill', async () => {
+      await createNewSkill();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.openSkill', async (skillId: string) => {
+      await openSkill(skillId);
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.importSkill', async () => {
+      await importSkillFromFile();
+    })
   );
 }
 
@@ -333,6 +365,82 @@ async function createNewSession(): Promise<void> {
   if (chatPanel) {
     chatPanel.loadSession(session);
   }
+}
+
+/** Prompt for a name + one-line description, scaffold the skill file, and open
+ *  it in the native editor — skills are edited as plain markdown, not through
+ *  an in-webview UI. */
+async function createNewSkill(): Promise<void> {
+  if (!skillsStore) {
+    vscode.window.showErrorMessage('Frappe Copilot: Workspace not initialized.');
+    return;
+  }
+
+  const name = await vscode.window.showInputBox({
+    prompt: 'Skill name',
+    placeHolder: 'e.g. Custom Print Format Boilerplate',
+    ignoreFocusOut: true,
+    validateInput: (v) => v.trim() ? null : 'Name cannot be empty',
+  });
+  if (!name) return;
+
+  const description = await vscode.window.showInputBox({
+    prompt: 'One-line description (shown to the copilot in its skills catalog)',
+    placeHolder: 'e.g. Reusable script + JSON template for a custom print format',
+    ignoreFocusOut: true,
+  });
+
+  const filePath = skillsStore.createSkill(name.trim(), (description || '').trim());
+  skillsProvider?.refresh();
+  chatPanel?.notifySkillsChanged();
+  const doc = await vscode.workspace.openTextDocument(filePath);
+  await vscode.window.showTextDocument(doc);
+}
+
+/** Opens a skill file in the native editor from a Skills tree item click.
+ *  Resolves through SkillsStore so this works for flat, bundle, and builtin skills. */
+async function openSkill(skillId: string): Promise<void> {
+  if (!skillsStore || !skillId) return;
+  const filePath = skillsStore.resolveSkillFilePath(skillId);
+  if (!filePath) {
+    vscode.window.showErrorMessage(`Frappe Copilot: Could not find skill '${skillId}'.`);
+    return;
+  }
+  try {
+    const doc = await vscode.workspace.openTextDocument(filePath);
+    await vscode.window.showTextDocument(doc);
+  } catch {
+    vscode.window.showErrorMessage(`Frappe Copilot: Could not open skill '${skillId}'.`);
+  }
+}
+
+/** Opens a file picker for a .md or .zip skill file and imports it — a flat
+ *  file for .md, a full skill bundle (SKILL.md + references/assets) for .zip. */
+async function importSkillFromFile(): Promise<void> {
+  if (!skillsStore) {
+    vscode.window.showErrorMessage('Frappe Copilot: Workspace not initialized.');
+    return;
+  }
+
+  const picked = await vscode.window.showOpenDialog({
+    canSelectMany: false,
+    openLabel: 'Import Skill',
+    filters: { 'Skill file': ['md', 'zip'] },
+  });
+  if (!picked || picked.length === 0) return;
+
+  const filePath = picked[0].fsPath;
+  const isZip = filePath.toLowerCase().endsWith('.zip');
+  const result = isZip ? skillsStore.importZipFile(filePath) : skillsStore.importMarkdownFile(filePath);
+
+  if (result.error) {
+    vscode.window.showErrorMessage(`Frappe Copilot: ${result.error}`);
+    return;
+  }
+
+  skillsProvider?.refresh();
+  chatPanel?.notifySkillsChanged();
+  vscode.window.showInformationMessage(`Frappe Copilot: Imported skill '${result.id}'.`);
 }
 
 /** Pick and execute a bench command. */

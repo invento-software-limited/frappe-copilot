@@ -14,6 +14,34 @@ body{font-family:var(--vscode-font-family,-apple-system,sans-serif);font-size:va
 .b-on{background:rgba(78,201,176,0.12);color:#4ec9b0;border:1px solid rgba(78,201,176,0.22);}
 .b-off{background:rgba(241,76,76,0.12);color:#f14c4c;border:1px solid rgba(241,76,76,0.22);}
 .b-pending{background:rgba(204,167,0,0.12);color:#cca700;border:1px solid rgba(204,167,0,0.22);}
+.b-agent{background:rgba(97,175,239,0.12);color:#61afef;border:1px solid rgba(97,175,239,0.22);}
+.b-warn{background:rgba(241,76,76,0.12);color:#f14c4c;border:1px solid rgba(241,76,76,0.22);}
+.agent-badge-msg .bub{padding:2px 0;}
+.run-toggle{display:inline-block;margin-top:4px;font-size:11px;color:var(--vscode-textLink-foreground,#4fc1ff);cursor:pointer;user-select:none;}
+.run-toggle:hover{text-decoration:underline;}
+.prompt-revert-icon{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin-top:4px;border-radius:5px;cursor:pointer;font-size:12px;line-height:1;color:var(--vscode-textLink-foreground,#4fc1ff);opacity:0.7;user-select:none;background:rgba(127,127,127,0.1);}
+.prompt-revert-icon:hover{opacity:1;background:rgba(127,127,127,0.2);}
+.prompt-revert-icon.reverted{pointer-events:none;opacity:0.45;}
+.revert-file-block{margin:6px 0;}
+.revert-file-name{font-size:11px;font-family:var(--vscode-editor-font-family,monospace);color:var(--vscode-descriptionForeground,#888);margin-bottom:3px;word-break:break-all;}
+.run-steps{margin-top:6px;padding:8px 10px;border-left:2px solid var(--vscode-widget-border,#333);font-size:12px;display:none;}
+.run-steps.show{display:block;}
+.run-step{margin-bottom:8px;}
+.run-step .run-step-label{font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--vscode-descriptionForeground,#888);margin-bottom:2px;}
+.verify-card{border:1px solid var(--vscode-widget-border,#333);border-radius:6px;padding:10px 12px;background:rgba(255,255,255,0.02);max-width:480px;}
+.verify-card-title{font-weight:600;font-size:12px;margin-bottom:6px;}
+.verify-card-desc{font-size:12px;color:var(--vscode-descriptionForeground,#ccc);margin-bottom:8px;}
+.verify-card-desc div{padding:1px 0;}
+.verify-note{font-size:11px;color:var(--vscode-descriptionForeground,#888);font-style:italic;margin-top:4px;}
+.feature-plan-list{margin:4px 0 0 18px;padding:0;font-size:12px;}
+.feature-plan-list li{margin-bottom:4px;}
+.compaction-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.compaction-banner .cb-text{font-size:12px;color:var(--vscode-descriptionForeground,#ccc);}
+.slash-menu{position:absolute;bottom:calc(100% + 4px);left:0;min-width:220px;max-width:360px;background:var(--vscode-dropdown-background,#252526);border:1px solid var(--vscode-dropdown-border,#454545);border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,0.3);z-index:50;overflow:hidden;}
+.slash-menu ul{list-style:none;margin:0;padding:4px;}
+.slash-menu li{padding:6px 8px;border-radius:4px;cursor:pointer;font-size:12px;display:flex;justify-content:space-between;gap:10px;}
+.slash-menu li .sm-desc{color:var(--vscode-descriptionForeground,#888);font-size:11px;}
+.slash-menu li.active,.slash-menu li:hover{background:var(--vscode-list-hoverBackground,rgba(255,255,255,0.06));}
 .sep{flex:1;}
 #chat{flex:1;overflow-y:auto;padding:12px 0;display:flex;flex-direction:column;}
 .msg{display:flex;gap:12px;padding:6px 16px;position:relative;}
@@ -93,7 +121,7 @@ body{font-family:var(--vscode-font-family,-apple-system,sans-serif);font-size:va
   background: rgba(255, 255, 255, 0.08) !important;
   color: var(--vscode-editor-foreground, #ffffff) !important;
 }
-#bot{display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--vscode-widget-border,#333);background:var(--vscode-editor-background,#1e1e1e);flex-shrink:0;}
+#bot{display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--vscode-widget-border,#333);background:var(--vscode-editor-background,#1e1e1e);flex-shrink:0;position:relative;}
 #inp{flex:1;background:var(--vscode-input-background,#3c3c3c);color:var(--vscode-input-foreground,#d4d4d4);border:1px solid var(--vscode-input-border,#555);border-radius:6px;padding:8px 12px;font-family:inherit;font-size:inherit;outline:none;min-height:18px;max-height:120px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;line-height:1.4;transition:border-color 0.15s ease,box-shadow 0.15s ease;}
 #inp:focus{border-color:var(--vscode-focusBorder,#007fd4);box-shadow:0 0 6px rgba(0,127,212,0.15);}
 #inp:empty::before{content:attr(placeholder);color:var(--vscode-input-placeholderForeground,#888);pointer-events:none;display:block;}
@@ -181,6 +209,11 @@ body{font-family:var(--vscode-font-family,-apple-system,sans-serif);font-size:va
 #atc .nm{color:var(--vscode-textLink-foreground,#4fc1ff);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #atc .rm{background:none;border:none;color:var(--vscode-descriptionForeground,#888);cursor:pointer;font-size:14px;padding:2px;}
 #atc .rm:hover{color:var(--vscode-editor-foreground,#d4d4d4);}
+#skill-atc{display:none;align-items:center;gap:6px;padding:4px 12px;font-size:12px;border-bottom:1px solid var(--vscode-widget-border,#333);flex-shrink:0;background:var(--vscode-editor-background,#1e1e1e);min-height:28px;}
+#skill-atc.on{display:flex;}
+#skill-atc .nm{color:#61afef;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#skill-atc .rm{background:none;border:none;color:var(--vscode-descriptionForeground,#888);cursor:pointer;font-size:14px;padding:2px;}
+#skill-atc .rm:hover{color:var(--vscode-editor-foreground,#d4d4d4);}
 ::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-thumb{background:var(--vscode-scrollbarSlider-background,#555);border-radius:3px;}
 
 /* Thinking / Loading State */
@@ -526,6 +559,16 @@ body{font-family:var(--vscode-font-family,-apple-system,sans-serif);font-size:va
   font-size: 11px;
   white-space: pre-wrap;
 }
+.diff-context {
+  color: var(--vscode-descriptionForeground,#888);
+  margin: 0 !important;
+  padding: 6px !important;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -663,6 +706,7 @@ window.onerror = function(message, source, lineno, colno, error) {
 <div class="hdr">
   <span class="ttl">✦ Frappe Copilot</span>
   <span class="badge b-pending" id="st">init</span>
+  <span class="badge b-on" id="token-badge" style="display:none;" title="">~0 tok</span>
   <span class="sep"></span>
   <select id="model-select" class="hdr-select" title="Select Model" style="display:none;"></select>
   <button class="hdr-btn" id="btn-new-chat" title="New Session">
@@ -799,6 +843,7 @@ window.onerror = function(message, source, lineno, colno, error) {
   </div>
 </div>
 <div id="atc"><span class="nm" id="fn"></span><button class="rm" id="rma">✕</button></div>
+<div id="skill-atc"><span class="nm" id="skill-atc-name"></span><button class="rm" id="skill-atc-rm">✕</button></div>
 <div id="bot">
   <input type="file" id="fi" accept=".pdf,.html,.htm">
   <button class="btn" id="upb" title="Attach file">
@@ -808,6 +853,7 @@ window.onerror = function(message, source, lineno, colno, error) {
   <button class="btn" id="snd" disabled title="Send">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 15a7 7 0 1 0 0-14 7 7 0 0 0 0 14zm-.5-8.707l-2.146 2.147-.708-.707L8 4.379l3.354 3.354-.708.707L8 6.293V12H7V6.293z"/></svg>
   </button>
+  <div id="slash-menu-container"></div>
 </div>
 <script>
 (function(){
@@ -838,6 +884,20 @@ window.onerror = function(message, source, lineno, colno, error) {
   }
 
   var ch=document.getElementById('chat'),ip=document.getElementById('inp'),sd=document.getElementById('snd'),modelSelect=document.getElementById('model-select');
+
+  // Auto-scroll only follows new content while the user is already at (or near) the
+  // bottom. Scrolling up manually detaches it; scrolling back to the bottom re-attaches.
+  var autoScroll = true;
+  var SCROLL_BOTTOM_THRESHOLD = 80;
+  function isNearBottom() {
+    return ch.scrollHeight - ch.scrollTop - ch.clientHeight < SCROLL_BOTTOM_THRESHOLD;
+  }
+  function stickScroll() {
+    if (autoScroll) ch.scrollTop = ch.scrollHeight;
+  }
+  ch.addEventListener('scroll', function() {
+    autoScroll = isNearBottom();
+  });
   var ub=document.getElementById('upb'),fi=document.getElementById('fi'),st=document.getElementById('st');
   var atc=document.getElementById('atc'),fnEl=document.getElementById('fn'),rmEl=document.getElementById('rma');
   var isSt=false,se=null,attachedFile=null;
@@ -853,7 +913,8 @@ window.onerror = function(message, source, lineno, colno, error) {
     execute_command: { icon: '💻', title: 'Execute Command' },
     introspect_doctype: { icon: '📊', title: 'Introspect DocType' },
     web_search: { icon: '🌐', title: 'Web Search' },
-    web_fetch: { icon: '📥', title: 'Fetch Web Page' }
+    web_fetch: { icon: '📥', title: 'Fetch Web Page' },
+    use_skill: { icon: '📎', title: 'Use Skill' }
   };
 
   function stripToolCalls(t) {
@@ -911,7 +972,7 @@ window.onerror = function(message, source, lineno, colno, error) {
     } else {
       ch.appendChild(el);
     }
-    ch.scrollTop = ch.scrollHeight;
+    stickScroll();
   }
 
   function showThinking(phaseLabel, retryCount) {
@@ -934,7 +995,7 @@ window.onerror = function(message, source, lineno, colno, error) {
           '</div>' +
         '</div>';
       ch.appendChild(thinkEl);
-      ch.scrollTop = ch.scrollHeight;
+      stickScroll();
       thinkStartTime = Date.now();
 
       thinkTimerInterval = setInterval(function() {
@@ -956,7 +1017,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         retryEl.style.display = 'none';
       }
     }
-    ch.scrollTop = ch.scrollHeight;
+    stickScroll();
   }
 
   function removeThinking() {
@@ -980,7 +1041,132 @@ window.onerror = function(message, source, lineno, colno, error) {
     }
   }
 
-  function addMsg(r,c){
+  var AGENT_META = {
+    'doctype-builder': {icon:'🗄️', label:'DocType / Schema Builder'},
+    'server-logic': {icon:'🐍', label:'Server-side Logic'},
+    'client-ui': {icon:'🖥️', label:'Client-side / UI'},
+    'devops-debug': {icon:'🛠️', label:'Bench/DevOps & Debug'},
+    'research': {icon:'🔎', label:'Research / Read-only'},
+    'architecture': {icon:'📐', label:'Architecture / Planning'},
+    'general': {icon:'🤖', label:'General'}
+  };
+
+  function showAgentBadge(m) {
+    var d=document.createElement('div');
+    d.className='msg system-msg agent-badge-msg';
+    d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
+      '<span class="badge b-agent">'+esc(m.icon||'')+' Routed to: '+esc(m.label||m.agentId)+'</span></div>';
+    appendToChat(d);
+  }
+
+  function showVerifyApproval(m) {
+    var d=document.createElement('div');
+    d.className='msg system-msg verify-approval-msg';
+    var descLines = [];
+    if (m.willMigrate) descLines.push('<div>• bench migrate</div>');
+    (m.testCommands||[]).forEach(function(t){ descLines.push('<div>• '+esc(t)+'</div>'); });
+    if (descLines.length === 0) descLines.push('<div>(nothing to run)</div>');
+    d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
+      '<div class="verify-card">' +
+        '<div class="verify-card-title">🔍 Verify this run?</div>' +
+        '<div class="verify-card-desc">'+descLines.join('')+'</div>' +
+        '<div class="tool-btn-container" id="verify-btns">' +
+          '<button class="tool-btn tool-btn-approve" id="verify-approve">Verify</button>' +
+          '<button class="tool-btn tool-btn-reject" id="verify-reject">Skip</button>' +
+        '</div>' +
+      '</div></div>';
+    appendToChat(d);
+    var btns = d.querySelector('#verify-btns');
+    d.querySelector('#verify-approve').onclick = function() {
+      btns.style.display = 'none';
+      vs.postMessage({ type: 'toolApproved' });
+    };
+    d.querySelector('#verify-reject').onclick = function() {
+      btns.style.display = 'none';
+      vs.postMessage({ type: 'toolRejected' });
+    };
+  }
+
+  function showVerifyResult(m) {
+    var d=document.createElement('div');
+    d.className='msg system-msg verify-result-msg';
+    var icon = m.passed ? '✅' : '❌';
+    var text = m.passed
+      ? 'Verification passed ('+m.roundsUsed+' attempt(s))'
+      : 'Verification FAILED after '+m.roundsUsed+' attempt(s)';
+    var notesHtml = (m.missingTestNotes||[]).map(function(n){ return '<div class="verify-note">'+esc(n)+'</div>'; }).join('');
+    var errHtml = (!m.passed && m.lastError) ? '<pre class="tool-out show">'+esc(m.lastError.slice(0,2000))+'</pre>' : '';
+    d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
+      '<span class="badge '+(m.passed?'b-on':'b-off')+'">'+icon+' '+esc(text)+'</span>' + notesHtml + errHtml + '</div>';
+    appendToChat(d);
+  }
+
+  function showFeaturePlan(m) {
+    var d=document.createElement('div');
+    d.className='msg system-msg feature-plan-msg';
+    var items = (m.stages||[]).map(function(s){
+      return '<li>'+esc(s.icon||'')+' <strong>'+esc(s.label)+'</strong> — '+esc(s.task)+'</li>';
+    }).join('');
+    d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
+      '<div class="verify-card-title">🧭 Feature plan ('+(m.stages||[]).length+' stage(s))</div>' +
+      '<ol class="feature-plan-list">'+items+'</ol></div>';
+    appendToChat(d);
+  }
+
+  function showFeatureStage(m, started) {
+    var d=document.createElement('div');
+    d.className='msg system-msg';
+    var label = 'Stage '+(m.index+1)+'/'+m.total+': '+esc(m.icon||'')+' '+esc(m.label);
+    var status = started ? 'started' : (m.verificationPassed===false ? 'finished — verification failed' : 'finished');
+    d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub"><span class="badge b-agent">'+label+' '+esc(status)+'</span></div>';
+    appendToChat(d);
+  }
+
+  var compactionBannerEl = null;
+  function showCompactionBanner(m) {
+    if (compactionBannerEl) return; // already showing one — don't stack
+    var d=document.createElement('div');
+    d.className='msg system-msg';
+    d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
+      '<div class="compaction-banner">' +
+        '<span class="cb-text">🗜️ This conversation is using ~'+Math.round(m.estimatedTokens/1000)+'k tokens (over the '+Math.round(m.thresholdTokens/1000)+'k threshold). Compacting summarizes older turns so future replies stay fast — nothing is deleted.</span>' +
+        '<button class="tool-btn tool-btn-approve" id="cb-compact">Compact now</button>' +
+        '<button class="tool-btn tool-btn-reject" id="cb-dismiss">Dismiss</button>' +
+      '</div></div>';
+    appendToChat(d);
+    compactionBannerEl = d;
+    d.querySelector('#cb-compact').onclick = function() {
+      d.remove();
+      compactionBannerEl = null;
+      vs.postMessage({ type: 'runSlashCommand', command: 'compact' });
+    };
+    d.querySelector('#cb-dismiss').onclick = function() {
+      d.remove();
+      compactionBannerEl = null;
+    };
+  }
+
+  function showCompactionApplied(m) {
+    if (compactionBannerEl) { compactionBannerEl.remove(); compactionBannerEl = null; }
+    var d=document.createElement('div');
+    d.className='msg system-msg';
+    d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
+      '<span class="badge b-on">✅ Conversation compacted</span></div>';
+    appendToChat(d);
+  }
+
+  function updateTokenBadge(m) {
+    var el = document.getElementById('token-badge');
+    if (!el) return;
+    var pct = m.budget ? (m.estimatedTokens / m.budget) : 0;
+    var cls = pct > 0.85 ? 'b-warn' : pct > 0.6 ? 'b-pending' : 'b-on';
+    el.className = 'badge ' + cls;
+    el.textContent = '~' + Math.round(m.estimatedTokens/1000) + 'k tok';
+    el.title = '~' + m.estimatedTokens + ' estimated tokens of conversation history (conservative ' + Math.round(m.budget/1000) + 'k budget, not model-specific). Covers conversation history only, not the RAG/schema/skills-catalog additions to the system prompt.';
+    el.style.display = 'inline-block';
+  }
+
+  function addMsg(r,c,meta){
     if (r === 'assistant') {
       removeThinking();
     }
@@ -1001,7 +1187,7 @@ window.onerror = function(message, source, lineno, colno, error) {
     var d=document.createElement('div');
     d.className='msg ' + (r === 'user' ? 'user-msg' : r === 'assistant' ? 'assistant-msg' : r === 'error' ? 'error-msg' : 'system-msg');
     var dn=r==='user'?'d-user':r==='assistant'?'d-assistant':r==='error'?'d-error':'d-system';
-    
+
     var contentHtml = md(displayedContent);
     activeMentions.forEach(function(m) {
       var escapedLabel = m.label.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -1009,12 +1195,275 @@ window.onerror = function(message, source, lineno, colno, error) {
       contentHtml = contentHtml.replace(regex, '<span class="mention-tag" data-uri="' + esc(m.fileUri) + '">' + esc(m.label) + '</span>');
     });
 
-    d.innerHTML='<div class="ln"></div><div class="dot '+dn+'"></div><div class="bub">'+contentHtml+'</div>';
+    var runToggleHtml = '';
+    if (meta && meta.runId) {
+      var am = AGENT_META[meta.agentId] || {};
+      var revertHtml = meta.hasCheckpoint
+        ? ' <span class="run-toggle" data-revert-run-id="'+esc(meta.runId)+'">↩ Revert this run</span>'
+        : '';
+      runToggleHtml = '<div><span class="badge b-agent">'+esc(am.icon||'🤖')+' '+esc(am.label||meta.agentId)+'</span> ' +
+        '<span class="run-toggle" data-run-id="'+esc(meta.runId)+'">Show sub-agent steps ▸</span>' + revertHtml +
+        '<div class="run-steps" id="run-steps-'+esc(meta.runId)+'"></div></div>';
+    } else if (meta && meta.isPromptRevert) {
+      runToggleHtml = '<div>' + promptRevertLinkHtml(meta.promptId) + '</div>';
+    }
+
+    d.innerHTML='<div class="ln"></div><div class="dot '+dn+'"></div><div class="bub">'+contentHtml+runToggleHtml+'</div>';
     appendToChat(d);
     renderMermaid();
+
+    // Tagged on every user bubble (even with no known promptId yet) so a
+    // later "userPromptStarted" event — sent once the backend has actually
+    // generated the id for this send — can find and label this exact bubble,
+    // and "promptCheckpointReady" can attach a revert link to it once we
+    // know the prompt produced one.
+    if (r === 'user') {
+      d.dataset.promptId = (meta && meta.promptId) || '';
+    }
+
+    if (meta && meta.runId) {
+      var toggleEl = d.querySelector('.run-toggle');
+      toggleEl.addEventListener('click', function() {
+        var stepsEl = document.getElementById('run-steps-'+meta.runId);
+        var show = stepsEl.classList.toggle('show');
+        toggleEl.textContent = show ? 'Hide sub-agent steps ▾' : 'Show sub-agent steps ▸';
+        if (show && !stepsEl.dataset.loaded) {
+          stepsEl.innerHTML = '<em>Loading…</em>';
+          vs.postMessage({ type: 'getRunTranscript', runId: meta.runId });
+        }
+      });
+      if (meta.hasCheckpoint) {
+        var revertEl = d.querySelector('[data-revert-run-id]');
+        revertEl.addEventListener('click', function() {
+          vs.postMessage({ type: 'revertRun', runId: meta.runId });
+        });
+      }
+    } else if (meta && meta.isPromptRevert) {
+      wirePromptRevertLink(d, meta.promptId);
+    }
   }
 
-  ip.addEventListener('input',function(){updBtn();});
+  function promptRevertLinkHtml(promptId) {
+    return '<span class="prompt-revert-icon" data-revert-prompt-id="'+esc(promptId)+'" title="Revert changes from this prompt">↩</span>';
+  }
+  function wirePromptRevertLink(bubbleEl, promptId) {
+    var el = bubbleEl.querySelector('[data-revert-prompt-id]');
+    if (!el) return;
+    el.addEventListener('click', function() {
+      // Show what will be reverted first — the actual revert only fires
+      // once the user confirms in that preview card (see showPromptRevertPreview).
+      vs.postMessage({ type: 'getPromptRevertPreview', promptId: promptId });
+    });
+  }
+  function showPromptRevertPreview(m) {
+    var files = m.files || [];
+    var filesHtml = files.map(function(f) {
+      if (f.willDelete) {
+        return '<div class="revert-file-block"><div class="revert-file-name">'+esc(f.path)+
+          ' <span class="badge b-off" style="font-size:10px;">will be deleted</span></div></div>';
+      }
+      var hunkHtml = (f.diffHunks || []).map(function(h) {
+        var cls = h.added ? 'diff-add' : h.removed ? 'diff-del' : '';
+        var prefix = h.added ? '+ ' : h.removed ? '- ' : '  ';
+        var lines = h.value.replace(/\n$/, '').split('\n').map(function(l){ return prefix + l; }).join('\n');
+        return cls ? '<pre class="'+cls+'"><code>'+esc(lines)+'</code></pre>' : '<pre class="diff-context"><code>'+esc(lines)+'</code></pre>';
+      }).join('');
+      return '<div class="revert-file-block"><div class="revert-file-name">'+esc(f.path)+'</div>' +
+        '<div class="diff-container">'+hunkHtml+'</div></div>';
+    }).join('');
+    var note = m.compacted
+      ? '<div class="verify-note">Note: this conversation has since been compacted — the summary may still describe work this revert undoes.</div>'
+      : '';
+
+    var d=document.createElement('div');
+    d.className='msg system-msg revert-preview-msg';
+    d.dataset.previewForPromptId = m.promptId;
+    d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
+      '<div class="verify-card">' +
+        '<div class="verify-card-title">↩️ Revert '+files.length+' file(s) to their state before this prompt?</div>' +
+        filesHtml + note +
+        '<div class="tool-btn-container" id="revert-preview-btns">' +
+          '<button class="tool-btn tool-btn-approve" id="revert-preview-yes">Revert Files</button>' +
+          '<button class="tool-btn tool-btn-reject" id="revert-preview-cancel">Cancel</button>' +
+        '</div>' +
+      '</div></div>';
+    appendToChat(d);
+    renderMermaid();
+
+    var btns = d.querySelector('#revert-preview-btns');
+    d.querySelector('#revert-preview-yes').onclick = function() {
+      btns.innerHTML = '<em>Reverting…</em>';
+      vs.postMessage({ type: 'revertPrompt', promptId: m.promptId });
+    };
+    d.querySelector('#revert-preview-cancel').onclick = function() {
+      d.remove();
+    };
+  }
+  // Backend generates promptId after this bubble is already on screen (see
+  // send()'s optimistic addMsg call) — tag the most recently sent user
+  // bubble once we're told what its id is.
+  function tagLastUserBubble(promptId) {
+    var bubbles = ch.querySelectorAll('.user-msg');
+    if (bubbles.length === 0) return;
+    bubbles[bubbles.length - 1].dataset.promptId = promptId;
+  }
+  // Only known once the run(s) that prompt spawned finish and we can see
+  // whether any of them left a checkpoint — inject the revert link then.
+  function addPromptRevertLink(promptId) {
+    var bubbles = ch.querySelectorAll('.user-msg');
+    for (var i = 0; i < bubbles.length; i++) {
+      if (bubbles[i].dataset.promptId === promptId) {
+        var bub = bubbles[i].querySelector('.bub');
+        if (bub && !bub.querySelector('[data-revert-prompt-id]')) {
+          var wrap = document.createElement('div');
+          wrap.innerHTML = promptRevertLinkHtml(promptId);
+          bub.appendChild(wrap.firstChild);
+          wirePromptRevertLink(bubbles[i], promptId);
+        }
+        return;
+      }
+    }
+  }
+
+  function renderRunTranscript(runId, entries) {
+    var stepsEl = document.getElementById('run-steps-'+runId);
+    if (!stepsEl) return;
+    stepsEl.dataset.loaded = 'true';
+    if (!entries || entries.length === 0) {
+      stepsEl.innerHTML = '<em>No recorded steps.</em>';
+      return;
+    }
+    stepsEl.innerHTML = '';
+    entries.forEach(function(e) {
+      var step = document.createElement('div');
+      step.className = 'run-step';
+      if (e.role === 'assistant') {
+        var text = stripToolCalls(e.content).trim();
+        step.innerHTML = '<div class="run-step-label">Assistant</div>' + md(text || '_(tool call only)_');
+      } else {
+        var toolMatch = e.content.match(/^<tool_result name="([^"]+)">/);
+        var label = toolMatch ? 'Tool result: ' + esc(toolMatch[1]) : 'Result';
+        var body = e.content.replace(/^<tool_result[^>]*>\n?/, '').replace(/\n?<\/tool_result>$/, '');
+        step.innerHTML = '<div class="run-step-label">'+label+'</div><pre class="tool-out show">'+esc(body)+'</pre>';
+      }
+      stepsEl.appendChild(step);
+    });
+  }
+
+  var SLASH_COMMANDS = [
+    { cmd: 'clear', label: '/clear', desc: 'Start a new session' },
+    { cmd: 'compact', label: '/compact', desc: 'Summarize and compact this conversation' },
+    { cmd: 'skills', label: '/skills', desc: 'Open the Skills panel' },
+    { cmd: 'model', label: '/model <name>', desc: 'Switch the active model' }
+  ];
+  var AVAILABLE_SKILLS = [];
+  var slashMenuContainer = document.getElementById('slash-menu-container');
+  var slashMenuOpen = false;
+  var slashMenuFiltered = [];
+  var slashMenuIndex = 0;
+
+  function allSlashEntries() {
+    var skillEntries = AVAILABLE_SKILLS.map(function(s) {
+      return { cmd: s.id, label: '/'+s.id, desc: s.description || s.name, isSkill: true, skillName: s.name };
+    });
+    return SLASH_COMMANDS.concat(skillEntries);
+  }
+
+  function matchSlashPrefix() {
+    var text = ip.innerText;
+    var m = text.match(/^\/([a-z0-9-]*)$/i);
+    return m ? m[1].toLowerCase() : null;
+  }
+
+  function updateSlashMenu() {
+    var prefix = matchSlashPrefix();
+    if (prefix === null) { closeSlashMenu(); return; }
+    slashMenuFiltered = allSlashEntries().filter(function(c) { return c.cmd.indexOf(prefix) === 0; });
+    if (slashMenuFiltered.length === 0) { closeSlashMenu(); return; }
+    slashMenuIndex = 0;
+    slashMenuOpen = true;
+    renderSlashMenu();
+  }
+
+  function renderSlashMenu() {
+    var items = slashMenuFiltered.map(function(c, i) {
+      return '<li data-idx="'+i+'" class="'+(i===slashMenuIndex?'active':'')+'"><span>'+esc(c.label)+'</span><span class="sm-desc">'+esc(c.desc)+'</span></li>';
+    }).join('');
+    slashMenuContainer.innerHTML = '<div class="slash-menu"><ul>'+items+'</ul></div>';
+    Array.prototype.forEach.call(slashMenuContainer.querySelectorAll('li'), function(li) {
+      li.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        selectSlashCommand(slashMenuFiltered[parseInt(li.getAttribute('data-idx'), 10)]);
+      });
+    });
+  }
+
+  function closeSlashMenu() {
+    slashMenuOpen = false;
+    slashMenuContainer.innerHTML = '';
+  }
+
+  var attachedSkill = null;
+  var skillAtcEl = document.getElementById('skill-atc');
+  var skillAtcNameEl = document.getElementById('skill-atc-name');
+
+  function showSkillChip(name) {
+    skillAtcNameEl.textContent = '📎 Skill: ' + name;
+    skillAtcEl.classList.add('on');
+  }
+  function hideSkillChip() {
+    attachedSkill = null;
+    skillAtcEl.classList.remove('on');
+  }
+  document.getElementById('skill-atc-rm').addEventListener('click', hideSkillChip);
+
+  function selectSlashCommand(entry) {
+    closeSlashMenu();
+    if (entry.cmd === 'model') {
+      ip.innerText = '/model ';
+      placeCaretAtEnd(ip);
+      return;
+    }
+    ip.innerHTML = '';
+    updBtn();
+    if (entry.isSkill) {
+      vs.postMessage({ type: 'getSkillContent', id: entry.cmd });
+      showSkillChip(entry.skillName || entry.cmd); // provisional label, replaced once content arrives
+      return;
+    }
+    if (entry.cmd === 'clear') {
+      vs.postMessage({ type: 'newSession' });
+    } else if (entry.cmd === 'compact' || entry.cmd === 'skills') {
+      vs.postMessage({ type: 'runSlashCommand', command: entry.cmd });
+    }
+  }
+
+  function placeCaretAtEnd(el) {
+    el.focus();
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function tryHandleModelSlashCommand(text) {
+    var m = text.match(/^\/model\s+(.+)$/i);
+    if (!m) return false;
+    var query = m[1].trim().toLowerCase();
+    var opts = Array.prototype.slice.call(modelSelect.options);
+    var match = opts.find(function(o) { return o.value.toLowerCase() === query || o.text.toLowerCase().indexOf(query) !== -1; });
+    if (match) {
+      modelSelect.value = match.value;
+      modelSelect.dispatchEvent(new Event('change'));
+    }
+    ip.innerHTML = '';
+    updBtn();
+    return true;
+  }
+
+  ip.addEventListener('input',function(){updBtn();updateSlashMenu();});
   function updBtn(){
     if (isSt) {
       sd.disabled = false;
@@ -1050,7 +1499,10 @@ window.onerror = function(message, source, lineno, colno, error) {
       return;
     }
     var text=ip.innerText.trim();
-    if(!text&&!attachedFile)return;
+    if(!text&&!attachedFile&&!attachedSkill)return;
+    if (!attachedFile && /^\/model\s+/i.test(text) && tryHandleModelSlashCommand(text)) return;
+
+    autoScroll = true;
 
     var usedMentions = activeMentions.filter(function(m) {
       return text.indexOf(m.label) !== -1;
@@ -1062,6 +1514,10 @@ window.onerror = function(message, source, lineno, colno, error) {
         return '\n\n### Code Mention: [' + m.relativePath + ':L' + m.startLine + '-L' + m.endLine + '](' + m.fileUri + '#L' + m.startLine + '-L' + m.endLine + ')\n```' + m.languageId + '\n' + m.code + '\n```';
       }).join('');
       llmText += details;
+    }
+    if (attachedSkill) {
+      llmText += '\n\n### Skill Applied: ' + attachedSkill.name + '\n' + attachedSkill.content;
+      hideSkillChip();
     }
 
     showThinking();
@@ -1082,7 +1538,15 @@ window.onerror = function(message, source, lineno, colno, error) {
       vs.postMessage({type:'sendMessage',text:llmText});
     }
   }
-  ip.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+  ip.addEventListener('keydown',function(e){
+    if (slashMenuOpen) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); slashMenuIndex = (slashMenuIndex + 1) % slashMenuFiltered.length; renderSlashMenu(); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); slashMenuIndex = (slashMenuIndex - 1 + slashMenuFiltered.length) % slashMenuFiltered.length; renderSlashMenu(); return; }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); selectSlashCommand(slashMenuFiltered[slashMenuIndex]); return; }
+      if (e.key === 'Escape') { e.preventDefault(); closeSlashMenu(); return; }
+    }
+    if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}
+  });
   sd.addEventListener('click',send);
 
   document.getElementById('btn-new-chat').onclick = function() {
@@ -1380,7 +1844,7 @@ window.onerror = function(message, source, lineno, colno, error) {
       seRawText += chunk;
       seContent.innerHTML = md(stripToolCalls(seRawText).trim());
     }
-    ch.scrollTop = ch.scrollHeight;
+    stickScroll();
   }
 
   function sf(id, f, fullReasoning){
@@ -1442,6 +1906,8 @@ window.onerror = function(message, source, lineno, colno, error) {
       argDetails = 'Query: ' + args.query;
     } else if (toolName === 'web_fetch' && args.url) {
       argDetails = 'URL: ' + args.url;
+    } else if (toolName === 'use_skill' && args.id) {
+      argDetails = 'Skill: ' + args.id;
     } else if (toolName === 'ask_clarification') {
       var q = args.questions || args.question || '';
       argDetails = q;
@@ -1470,7 +1936,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         '<span class="tool-status ts-pending" id="t-status">pending</span>' +
       '</div>' +
       '<pre class="tool-args">' + esc(argDetails) + '</pre>' +
-      customHtml +
+      '<div id="t-custom">' + customHtml + '</div>' +
       '<div class="tool-approval" style="display:none;" id="t-approval">' +
         '<span class="tool-approval-msg">⚠️ High-risk tool. Requires approval.</span>' +
         '<div class="tool-btn-container">' +
@@ -1705,6 +2171,38 @@ window.onerror = function(message, source, lineno, colno, error) {
         }
         break;
       case 'graphUpdated': renderGraph(m.graph); break;
+      case 'agentRouted': showAgentBadge(m); break;
+      case 'runTranscript': renderRunTranscript(m.runId, m.entries); break;
+      case 'verifyApprovalRequired': showVerifyApproval(m); break;
+      case 'verifyResult': showVerifyResult(m); break;
+      case 'featurePlan': showFeaturePlan(m); break;
+      case 'featureStageStarted': showFeatureStage(m, true); break;
+      case 'featureStageFinished': showFeatureStage(m, false); break;
+      case 'runReverted':
+        var revertedEl = document.querySelector('[data-revert-run-id="'+m.runId+'"]');
+        if (revertedEl) { revertedEl.textContent = '✅ Reverted ('+m.count+' file(s))'; revertedEl.style.pointerEvents = 'none'; revertedEl.style.opacity = '0.6'; }
+        break;
+      case 'userPromptStarted': tagLastUserBubble(m.promptId); break;
+      case 'promptCheckpointReady': addPromptRevertLink(m.promptId); break;
+      case 'promptRevertPreview': showPromptRevertPreview(m); break;
+      case 'promptReverted':
+        var revertedIconEl = document.querySelector('[data-revert-prompt-id="'+m.promptId+'"]');
+        if (revertedIconEl) {
+          revertedIconEl.textContent = '✅';
+          revertedIconEl.title = 'Reverted ('+m.count+' file(s))';
+          revertedIconEl.classList.add('reverted');
+        }
+        var previewEl = document.querySelector('[data-preview-for-prompt-id="'+m.promptId+'"] #revert-preview-btns');
+        if (previewEl) { previewEl.innerHTML = '<span class="badge b-on">✅ Reverted ('+m.count+' file(s))</span>'; }
+        break;
+      case 'skillsList': AVAILABLE_SKILLS = m.skills || []; break;
+      case 'skillContent':
+        attachedSkill = { id: m.id, name: m.name, content: m.content };
+        showSkillChip(m.name);
+        break;
+      case 'compactionOffered': showCompactionBanner(m); break;
+      case 'compactionApplied': showCompactionApplied(m); break;
+      case 'tokenUsage': updateTokenBadge(m); break;
       case 'agentState':
         if (m.state === 'running') {
           showThinking(m.phase || '');
@@ -1734,6 +2232,19 @@ window.onerror = function(message, source, lineno, colno, error) {
 
       case 'toolApprovalRequired':
         if (curToolCard) {
+          if (m.diffHunks) {
+            var customEl = curToolCard.querySelector('#t-custom');
+            if (customEl) {
+              var hunkHtml = m.diffHunks.map(function(h) {
+                var cls = h.added ? 'diff-add' : h.removed ? 'diff-del' : '';
+                var prefix = h.added ? '+ ' : h.removed ? '- ' : '  ';
+                var lines = h.value.replace(/\n$/, '').split('\n').map(function(l){ return prefix + l; }).join('\n');
+                return cls ? '<pre class="'+cls+'"><code>'+esc(lines)+'</code></pre>' : '<pre class="diff-context"><code>'+esc(lines)+'</code></pre>';
+              }).join('');
+              var newFileBadge = !m.fileExisted ? '<span class="badge b-agent" style="margin-bottom:4px;display:inline-block;">new file</span>' : '';
+              customEl.innerHTML = newFileBadge + '<div class="diff-container">' + hunkHtml + '</div>';
+            }
+          }
           var appDiv = curToolCard.querySelector('#t-approval');
           appDiv.style.display = 'flex';
 
@@ -1863,13 +2374,17 @@ window.onerror = function(message, source, lineno, colno, error) {
         break;
       case 'loadSession':
         ch.innerHTML = '';
+        autoScroll = true;
         activeMentions = [];
         if (m.messages && m.messages.length > 0) {
           m.messages.forEach(function(msg) {
             if (msg.role === 'user') {
               parseAndRegisterMentions(msg.content);
             }
-            addMsg(msg.role, msg.content);
+            var msgMeta = msg.runId
+              ? { agentId: msg.agentId, runId: msg.runId, hasCheckpoint: msg.hasCheckpoint }
+              : (msg.role === 'user' && msg.promptHasCheckpoint ? { isPromptRevert: true, promptId: msg.promptId } : null);
+            addMsg(msg.role, msg.content, msgMeta);
           });
         } else {
           showWelcomeScreen();
@@ -2184,6 +2699,7 @@ window.onerror = function(message, source, lineno, colno, error) {
     var bubbleText = '💬 **Clarifications Answered:**\n\n' + answers.map(function(item) {
       return '* **Q:** ' + item.question + '\n  **A:** ' + item.answer;
     }).join('\n');
+    autoScroll = true;
     addMsg('user', bubbleText);
 
     vs.postMessage({ type: 'clarificationSubmitted', answers: resultText });

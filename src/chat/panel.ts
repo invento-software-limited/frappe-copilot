@@ -4,12 +4,76 @@ import * as fs from 'fs';
 import { LLMProvider } from '../providers/interface';
 import { runClaudeOAuthFlow } from '../providers/anthropicOAuth';
 import { SessionManager } from '../session/manager';
-import { BenchEnvironment, Session } from '../types';
+import { BenchEnvironment, Session, Message, CheckpointEntry } from '../types';
 import { readIntakeFile } from '../intake/fileReader';
 import { ToolExecutor } from '../agents/toolExecutor';
-import { SYSTEM_PROMPT } from '../agents/prompts';
+import { buildSystemPrompt } from '../agents/prompts';
+import { AgentDefinition, ToolName } from '../agents/types';
+import { AGENTS, GENERAL_AGENT } from '../agents/registry';
+import { ROUTER_CONTEXT_TURNS } from '../agents/router';
+import { routeOrPlan, StagePlan } from '../agents/planner';
+import {
+  TouchedFile, VerificationOutcome, classifyTouchedFile, buildVerificationPlan,
+  VERIFY_MAX_ROUNDS, VERIFY_FIX_STEP_BUDGET, migrateCmd
+} from '../agents/verification';
 import { VectorStore } from '../agents/vectorStore';
 import { GraphStore } from '../agents/graphStore';
+import { SkillsStore } from '../agents/skillsStore';
+import { readConfig } from '../workspace/structure';
+import { estimateMessagesTokens, buildCompactionPrompt, DEFAULT_COMPACTION_THRESHOLD_TOKENS } from '../session/compaction';
+import { diffLines } from 'diff';
+
+const MAX_DIFF_READ_BYTES = 1 * 1024 * 1024;
+
+/** The main task loop has no overall step cap — it runs until the model
+ *  naturally stops calling tools. But a model that structurally can't emit
+ *  this app's tool-call format (garbled/wrong-syntax output — see the
+ *  malformed-tool-call check in runOneAgentStep) will just repeat that
+ *  failure forever; more retries won't fix a provider/model bug. Give up
+ *  and report honestly after this many *consecutive* malformed attempts. */
+const MAX_CONSECUTIVE_MALFORMED_TOOL_CALLS = 5;
+
+/** Each provider already retries a failed request a few times internally
+ *  before the promise/generator ever throws (see e.g. openai.ts's own
+ *  MAX_RETRIES loop) — so a thrown stream error reaching here has already
+ *  survived that. It can still happen for a genuine mid-stream connection
+ *  drop (the underlying HTTP/SSE connection dies after some chunks already
+ *  arrived, not just on initial connect) — transient, and retrying the same
+ *  step recovers cleanly since nothing was persisted yet. Only give up after
+ *  this many *consecutive* step-level failures, so a real outage/rate limit
+ *  still ends the run rather than spinning forever. */
+const MAX_CONSECUTIVE_STREAM_ERRORS = 5;
+
+/** Rough, deliberately conservative single default — this codebase has no
+ *  per-model context-window registry, and building one is out of scope for a
+ *  ballpark usage indicator. */
+const TOKEN_BUDGET_ESTIMATE = 180000;
+
+interface RunAgentLoopOptions {
+  /** Run bench migrate/tests after this agent finishes, self-correcting on failure. */
+  verify?: boolean;
+  /** Whether to wipe the cosmetic workflow graph at the start of this run — false when chained as a pipeline stage. */
+  resetGraph?: boolean;
+  /** Edge this run's parent graph node from a prior stage's run, when chained. */
+  precedingRunId?: string;
+  /** Cosmetic prefix for this run's graph node label, e.g. "Stage 2/3:". */
+  graphLabelPrefix?: string;
+  /** Shared id for the user prompt this run was spawned from — see Message.promptId. */
+  promptId?: string;
+}
+
+interface RunAgentLoopOutcome {
+  runId: string;
+  done: boolean;
+  verification: VerificationOutcome | null;
+}
+
+interface AgentStepResult {
+  done: boolean;
+  assistantText: string;
+  /** True when the outer loop should stop even though `done` is false (abort/stream error). */
+  stopLoop: boolean;
+}
 
 export class ChatPanel {
   public static readonly viewType = 'frappeCopilot.chat';
@@ -20,6 +84,7 @@ export class ChatPanel {
   private toolExecutor: ToolExecutor;
   private vectorStore: VectorStore | null = null;
   private graphStore: GraphStore | null = null;
+  private skillsStore: SkillsStore | null = null;
   private schemaMap: { doctypes: string[], apps: string[] } | null = null;
   private pendingApproval: { resolve: (approved: boolean) => void } | null = null;
   private pendingClarification: { resolve: (answers: string) => void } | null = null;
@@ -41,11 +106,13 @@ export class ChatPanel {
       this.uploadsDir = path.join(fp, 'uploads');
       this.vectorStore = new VectorStore(fp, extensionPath, provider);
       this.graphStore = new GraphStore(fp);
+      this.skillsStore = new SkillsStore(fp, path.join(extensionPath, 'assets', 'skills'));
+      this.skillsStore.migrateLegacyMemoryIfNeeded();
       this.introspectSchema(fp);
     }
-    
+
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    this.toolExecutor = new ToolExecutor(root, benchEnv);
+    this.toolExecutor = new ToolExecutor(root, benchEnv, this.skillsStore);
   }
 
   show(): void {
@@ -91,15 +158,38 @@ export class ChatPanel {
     this.todoList = [];
     this.say('todoListUpdated', { tasks: [] });
     const messages = this.sessionManager.readMessages(session.id);
+
+    // Flag each user message whose promptId produced a revertible checkpoint
+    // in some later run — the webview uses this to decide which historical
+    // prompts get a "Revert changes from this prompt" link on reload.
+    const promptIdsWithCheckpoint = new Set(
+      messages.filter(m => m.hasCheckpoint && m.promptId).map(m => m.promptId)
+    );
+    const enriched = messages.map(m =>
+      m.role === 'user' && m.promptId && promptIdsWithCheckpoint.has(m.promptId)
+        ? { ...m, promptHasCheckpoint: true }
+        : m
+    );
+
     this.say('loadSession', {
       sessionName: session.name,
-      messages: messages
+      messages: enriched
     });
+    this.reportSessionSize(session);
   }
   setBenchEnv(env: BenchEnvironment | null): void {
     this.benchEnv = env;
     this.say('benchStatus', env?.type || 'unknown');
     this.toolExecutor.setBenchEnv(env);
+  }
+
+  /** Pushes the current skills catalog to the webview so the "/" picker can
+   *  offer direct /skill-id invocation. Called on 'ready' and again whenever
+   *  a skill is created/imported from outside the chat panel (extension.ts). */
+  notifySkillsChanged(): void {
+    if (!this.skillsStore) return;
+    const skills = this.skillsStore.listSkills();
+    this.say('skillsList', { skills });
   }
 
   private getWebviewContent(): string {
@@ -132,7 +222,17 @@ export class ChatPanel {
           this.loadSession(this.sessionManager.activeSession);
         }
         this.say('todoListUpdated', { tasks: this.todoList });
+        this.notifySkillsChanged();
         break;
+      case 'getSkillContent': {
+        if (!this.skillsStore || !msg.id) break;
+        const skill = this.skillsStore.listSkills().find(s => s.id === msg.id);
+        const content = this.skillsStore.readSkill(msg.id);
+        if (content) {
+          this.say('skillContent', { id: msg.id, name: skill?.name || msg.id, content });
+        }
+        break;
+      }
       case 'sendMessage':
         await this.handleSend(msg.text);
         break;
@@ -189,6 +289,14 @@ export class ChatPanel {
         break;
       case 'openHistory':
         vscode.commands.executeCommand('frappe-copilot.sessions.focus');
+        break;
+      case 'runSlashCommand':
+        if (msg.command === 'compact') {
+          const session = this.sessionManager.activeSession;
+          if (session) await this.runManualCompaction(session);
+        } else if (msg.command === 'skills') {
+          try { await vscode.commands.executeCommand('frappe-copilot.skills.focus'); } catch { /* view not registered yet */ }
+        }
         break;
       case 'clarificationSubmitted':
         if (this.pendingClarification) {
@@ -293,6 +401,71 @@ export class ChatPanel {
           this.say('status', hasKey ? 'ready' : 'no-key');
         }
         break;
+      case 'getRunTranscript': {
+        const session = this.sessionManager.activeSession;
+        if (session && msg.runId) {
+          const entries = this.sessionManager.readRunTranscript(session.id, msg.runId);
+          this.say('runTranscript', { runId: msg.runId, entries });
+        }
+        break;
+      }
+      case 'revertRun': {
+        const session = this.sessionManager.activeSession;
+        if (!session || !msg.runId) break;
+        const entries = this.sessionManager.readCheckpoint(session.id, msg.runId);
+        if (entries.length === 0) break;
+
+        const note = this.sessionManager.readCompactionState(session.id)
+          ? ' Note: this conversation has since been compacted — the summary may still describe work this revert undoes.'
+          : '';
+        const choice = await vscode.window.showWarningMessage(
+          `Revert ${entries.length} file(s) to their state before this run? This restores files to their pre-run content — any edits you made to them since (manually or via later runs) will be lost.${note}`,
+          { modal: true },
+          'Revert Files'
+        );
+        if (choice !== 'Revert Files') break;
+
+        this.restoreCheckpointEntries(entries);
+        this.say('runReverted', { runId: msg.runId, count: entries.length });
+        vscode.window.showInformationMessage(`Frappe Copilot: Reverted ${entries.length} file(s).`);
+        break;
+      }
+      case 'getPromptRevertPreview': {
+        const session = this.sessionManager.activeSession;
+        if (!session || !msg.promptId) break;
+        const entries = this.getMergedPromptCheckpoint(session.id, msg.promptId);
+        if (!entries || entries.length === 0) break;
+
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+        const files = entries.map(e => {
+          const abs = path.resolve(root, e.path);
+          if (!e.existedBefore) {
+            // The prompt created this file — reverting deletes it entirely, nothing to diff.
+            return { path: e.path, willDelete: true, diffHunks: null };
+          }
+          const currentContent = this.readFileCapped(abs) ?? '';
+          return { path: e.path, willDelete: false, diffHunks: diffLines(currentContent, e.originalContent ?? '') };
+        });
+        this.say('promptRevertPreview', {
+          promptId: msg.promptId,
+          files,
+          compacted: !!this.sessionManager.readCompactionState(session.id)
+        });
+        break;
+      }
+      case 'revertPrompt': {
+        const session = this.sessionManager.activeSession;
+        if (!session || !msg.promptId) break;
+        const entries = this.getMergedPromptCheckpoint(session.id, msg.promptId);
+        if (!entries || entries.length === 0) break;
+
+        // Confirmation already happened in the webview's own preview card
+        // (see getPromptRevertPreview) — no second native modal here.
+        this.restoreCheckpointEntries(entries);
+        this.say('promptReverted', { promptId: msg.promptId, count: entries.length });
+        vscode.window.showInformationMessage(`Frappe Copilot: Reverted ${entries.length} file(s).`);
+        break;
+      }
       case 'getSettings':
         const activeProviderId = vscode.workspace.getConfiguration('frappe-copilot').get<string>('provider', 'opencode-zen');
         const hasKeyVal = await (this.provider as any).hasApiKey?.();
@@ -383,6 +556,54 @@ export class ChatPanel {
     });
   }
 
+  /** Shared by diff preview and checkpoint capture — same 1MB guardrail as
+   *  ToolExecutor.readFile, so a huge existing file is never synchronously
+   *  read/diffed/held in memory on the extension host thread. */
+  private readFileCapped(absPath: string): string | null {
+    try {
+      const stat = fs.statSync(absPath);
+      if (stat.size > MAX_DIFF_READ_BYTES) return null;
+      return fs.readFileSync(absPath, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
+  /** Shared by revertRun and revertPrompt: restores each entry's before-image
+   *  (or deletes the file if it didn't exist before the run/prompt started). */
+  private restoreCheckpointEntries(entries: CheckpointEntry[]): void {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    for (const e of entries) {
+      const abs = path.resolve(root, e.path);
+      if (e.existedBefore) {
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, e.originalContent ?? '', 'utf-8');
+      } else if (fs.existsSync(abs)) {
+        fs.rmSync(abs);
+      }
+    }
+  }
+
+  /** Shared by getPromptRevertPreview and revertPrompt: collects every
+   *  checkpoint entry from every run this prompt spawned, keeping only the
+   *  *earliest* before-image per path (runs are read in chronological order)
+   *  so the result reverts a file to how it was before the whole prompt
+   *  started, not just before whichever stage touched it last. */
+  private getMergedPromptCheckpoint(sessionId: string, promptId: string): CheckpointEntry[] | null {
+    const runIds = this.sessionManager.readMessages(sessionId)
+      .filter(m => m.promptId === promptId && m.hasCheckpoint && m.runId)
+      .map(m => m.runId!);
+    if (runIds.length === 0) return null;
+
+    const merged = new Map<string, CheckpointEntry>();
+    for (const runId of runIds) {
+      for (const entry of this.sessionManager.readCheckpoint(sessionId, runId)) {
+        if (!merged.has(entry.path)) merged.set(entry.path, entry);
+      }
+    }
+    return [...merged.values()];
+  }
+
   private parseToolCalls(text: string): { name: string; args: Record<string, string>; raw: string }[] {
     const toolCalls: { name: string; args: Record<string, string>; raw: string }[] = [];
     const regex = /<tool_call\s+name="(\w+)"\s*>([\s\S]*?)<\/tool_call>/g;
@@ -413,7 +634,13 @@ export class ChatPanel {
     this.say('agentState', { state: 'running' });
     const session = this.sessionManager.activeSession || this.sessionManager.createSession('Chat');
     const isFirstMessage = session.messageCount === 0;
-    this.sessionManager.appendMessage(session.id, { role: 'user', content: userMessage });
+    const promptId = this.sessionManager.generateRunId();
+    this.sessionManager.appendMessage(session.id, { role: 'user', content: userMessage, promptId });
+    // The user's bubble is already rendered locally by the webview before this
+    // runs — tag it with promptId now so a later "revert changes from this
+    // prompt" affordance (added once we know whether any run produced a
+    // checkpoint, in the `finally` below) can find the right bubble.
+    this.say('userPromptStarted', { promptId });
 
     if (isFirstMessage) {
       let firstLine = userMessage.split('\n')[0].trim();
@@ -434,234 +661,667 @@ export class ChatPanel {
       this.sessionManager.renameSession(session.id, autoName);
     }
 
-    const maxSteps = 10;
-    let step = 0;
-    let done = false;
-
-    // 1. Initialize Visual Workflow Graph Planner
-    if (this.graphStore) {
-      this.graphStore.init("Workflow Executor");
-      this.graphStore.addNode({
-        id: "plan",
-        type: "reader",
-        label: "Analyzing Requirements",
-        description: "Reviewing prompt context, seeding schema directory and scanning vector guides.",
-        status: "running",
-        progress: 30
-      });
-      this.say('graphUpdated', this.graphStore.get());
-    }
-
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const multiAgentEnabled = vscode.workspace.getConfiguration('frappe-copilot').get<boolean>('multiAgent.enabled', false);
 
     try {
-      while (!done && step < maxSteps) {
-        if (this.aborted) {
-          this.chat('system', '⏹️ Execution cancelled by user.');
-          break;
+      if (multiAgentEnabled) {
+        const recentHistory = this.sessionManager.readMessages(session.id).slice(-ROUTER_CONTEXT_TURNS);
+        const route = await routeOrPlan(this.provider, userMessage, recentHistory, AGENTS);
+
+        if (route.kind === 'plan' && route.stages && route.stages.length > 1) {
+          await this.runFeaturePipeline(route.stages, session, userMessage, promptId);
+        } else {
+          const agentId = route.kind === 'single' ? route.agentId! : route.stages?.[0]?.agentId ?? 'general';
+          const agent = AGENTS.find(a => a.id === agentId) || GENERAL_AGENT;
+          this.say('agentRouted', { agentId: agent.id, label: agent.label, icon: agent.icon, reasoning: route.reasoning });
+          await this.runAgentLoop(agent, session, userMessage, { verify: true, promptId });
         }
-        step++;
-        const history = this.sessionManager.readMessages(session.id);
-        
-        let ragContext = '';
-        if (this.vectorStore) {
-          try {
-            const results = await this.vectorStore.search(userMessage, 3);
-            if (results.length > 0) {
-              ragContext = `\n\n### Retrieved Documentation Context\nUse the following reference snippets to guide your implementation, ensuring you adhere to correct APIs and patterns:\n\n` + 
-                           results.map(r => `--- [Source: ${r.source}] ---\n${r.text}`).join('\n\n');
-            }
-          } catch (e) {
-            console.error('Failed to run vector search:', e);
-          }
-        }
-
-        let schemaContext = '';
-        if (this.schemaMap) {
-          schemaContext = `\n\n### Active Workspace Schema Directory\nThe active site has the following properties:\n` +
-                          `- Installed Apps: ${this.schemaMap.apps.join(', ')}\n` +
-                          `- Active DocTypes: ${this.schemaMap.doctypes.join(', ')}\n` +
-                          `Verify if DocTypes or apps exist in this directory before proposing references or creating them.`;
-        }
-
-        let skillsMemory = '';
-        const cpPath = this.getFrappeCopilotPath();
-        if (cpPath) {
-          const memoryPath = path.join(cpPath, 'skills_memory.md');
-          if (fs.existsSync(memoryPath)) {
-            try {
-              skillsMemory = `\n\n### Persistent Skills Memory\nYou have previously saved the following instructions, patterns, and code checklists. Always adhere to these custom guidelines:\n\n` + 
-                             fs.readFileSync(memoryPath, 'utf-8');
-            } catch (e) {
-              console.error('Failed to read skills memory:', e);
-            }
-          }
-        }
-
-        const messages = [{ role: 'system', content: SYSTEM_PROMPT + ragContext + schemaContext + skillsMemory }, ...history];
-
-        this.say('agentState', { state: 'running', phase: step === 1 ? 'Analyzing request...' : 'Continuing reasoning...' });
-
-        let fullContent = '';
-        try {
-          fullContent = await this.stream(messages);
-        } catch (e: any) {
-          this.chat('error', `LLM Stream error: ${e.message || String(e)}`);
-          break;
-        }
-
-        if (fullContent.trim()) {
-          this.sessionManager.appendMessage(session.id, { role: 'assistant', content: fullContent });
-        }
-
-        const toolCalls = this.parseToolCalls(fullContent);
-        if (toolCalls.length === 0) {
-          done = true;
-          break;
-        }
-
-        for (const tool of toolCalls) {
-          // Tell UI we are starting tool call
-          this.say('toolCallStarted', { tool: tool.name, args: tool.args });
-
-          // 2. Add node for this step in visual graph
-          const nodeId = `tool-${step}-${tool.name}`;
-          if (this.graphStore) {
-            this.graphStore.addNode({
-              id: nodeId,
-              type: "chunk",
-              label: `${tool.name}`,
-              description: `Args: ${Object.keys(tool.args).join(', ')}`,
-              status: "running",
-              progress: 50
-            });
-            this.graphStore.addEdge("plan", nodeId);
-            this.say('graphUpdated', this.graphStore.get());
-          }
-
-          let approved = true;
-          const isHighRisk = ['execute_command', 'write_file', 'edit_file'].includes(tool.name);
-          if (isHighRisk) {
-            this.say('toolApprovalRequired', { tool: tool.name, args: tool.args });
-            approved = await this.waitForApproval(tool.name, tool.args);
-          }
-
-          let resultOutput = '';
-          if (tool.name === 'update_todo_list') {
-            const tasksText = tool.args.tasks || '';
-            const tasks = this.parseTodoList(tasksText);
-            this.todoList = tasks;
-            this.say('todoListUpdated', { tasks: this.todoList });
-            resultOutput = `Todo list updated with ${tasks.length} items.`;
-            
-            if (this.graphStore) {
-              this.graphStore.updateNode(nodeId, {
-                status: "completed",
-                progress: 100
-              });
-              this.say('graphUpdated', this.graphStore.get());
-            }
-            this.say('toolFinished', { tool: tool.name, success: true, output: resultOutput });
-          } else if (tool.name === 'ask_clarification') {
-            const questionsText = tool.args.questions || tool.args.question || '';
-            this.say('showClarificationPopup', { questions: questionsText });
-            this.say('agentState', { state: 'paused' });
-            
-            const answersText = await new Promise<string>((resolve) => {
-              this.pendingClarification = { resolve };
-            });
-            
-            resultOutput = answersText;
-            
-            if (this.graphStore) {
-              this.graphStore.updateNode(nodeId, {
-                status: "completed",
-                progress: 100
-              });
-              this.say('graphUpdated', this.graphStore.get());
-            }
-            this.say('toolFinished', { tool: tool.name, success: true, output: resultOutput });
-          } else if (approved) {
-            this.say('toolExecuting', { tool: tool.name });
-            const result = await this.toolExecutor.runTool(tool.name, tool.args);
-            resultOutput = result.output;
-
-            // 3. Compile validation & Auto-healing loop
-            let validationOutput = '';
-            if (result.success && (tool.name === 'write_file' || tool.name === 'edit_file')) {
-              const ext = path.extname(tool.args.path);
-              if (ext === '.py' || ext === '.js') {
-                const absPath = path.resolve(root, tool.args.path);
-                const validateCmd = ext === '.py'
-                  ? `python -m py_compile "${absPath}"`
-                  : `node -c "${absPath}"`;
-
-                const valResult = await this.toolExecutor.executeCommand(validateCmd);
-                if (!valResult.success) {
-                  validationOutput = `\n\n[LINTER WARNING] File compiled with error:\n${valResult.output}`;
-                  this.chat('error', `⚠️ Linter warning on ${tool.args.path}: compilation check failed.`);
-                  
-                  if (this.graphStore) {
-                    this.graphStore.updateNode(nodeId, {
-                      status: "failed",
-                      details: "Compilation validation failed."
-                    });
-                    this.say('graphUpdated', this.graphStore.get());
-                  }
-                }
-              }
-            }
-
-            resultOutput += validationOutput;
-
-            if (this.graphStore && !validationOutput) {
-              this.graphStore.updateNode(nodeId, {
-                status: result.success ? "completed" : "failed",
-                progress: 100
-              });
-              this.say('graphUpdated', this.graphStore.get());
-            }
-
-            this.say('toolFinished', { tool: tool.name, success: result.success && !validationOutput, output: resultOutput });
-          } else {
-            resultOutput = 'Tool execution rejected by the user.';
-            
-            if (this.graphStore) {
-              this.graphStore.updateNode(nodeId, {
-                status: "failed",
-                details: "Rejected by user."
-              });
-              this.say('graphUpdated', this.graphStore.get());
-            }
-
-            this.say('toolFinished', { tool: tool.name, success: false, output: resultOutput });
-          }
-
-          // Append tool result as a user message (so LLM can read it in the next step)
-          const resultMsg = `<tool_result name="${tool.name}">\n${resultOutput}\n</tool_result>`;
-          this.sessionManager.appendMessage(session.id, { role: 'user', content: resultMsg });
-        }
-      }
-
-      // Finalize visual graph
-      if (this.graphStore) {
-        this.graphStore.updateNode("plan", { status: "completed", progress: 100 });
-        this.graphStore.get().currentState = 'completed';
-        this.say('graphUpdated', this.graphStore.get());
+      } else {
+        await this.runAgentLoop(GENERAL_AGENT, session, userMessage, { promptId });
       }
     } catch (e: any) {
       this.chat('error', `Agent execution failed: ${e.message || String(e)}`);
     } finally {
       this.isRunningAgent = false;
       this.say('agentState', { state: 'idle' });
+      this.reportSessionSize(session);
+
+      const producedCheckpoint = this.sessionManager.readMessages(session.id)
+        .some(m => m.promptId === promptId && m.hasCheckpoint);
+      if (producedCheckpoint) {
+        this.say('promptCheckpointReady', { promptId });
+      }
     }
+  }
+
+  /** Sends the token-usage badge update and, if the effective (post-compaction)
+   *  history has grown past the configured threshold, offers — never forces —
+   *  compaction. Called after every turn and after loading/switching a session. */
+  private reportSessionSize(session: Session): void {
+    const effective = this.sessionManager.buildEffectiveHistory(session.id);
+    const estimatedTokens = estimateMessagesTokens(effective);
+    this.say('tokenUsage', { estimatedTokens, budget: TOKEN_BUDGET_ESTIMATE });
+
+    const autoOffer = vscode.workspace.getConfiguration('frappe-copilot').get<boolean>('compaction.autoOffer', true);
+    const thresholdTokens = vscode.workspace.getConfiguration('frappe-copilot').get<number>('compaction.thresholdTokens', DEFAULT_COMPACTION_THRESHOLD_TOKENS);
+    if (autoOffer && estimatedTokens > thresholdTokens) {
+      this.say('compactionOffered', { estimatedTokens, thresholdTokens });
+    }
+  }
+
+  /** "Summarize and replace": one non-streaming LLM call summarizes the full
+   *  raw history into session's context.md; messages.jsonl itself is never
+   *  touched — only buildEffectiveHistory()'s output (what gets sent to the
+   *  model going forward) shrinks. */
+  private async runManualCompaction(session: Session): Promise<void> {
+    const allMessages = this.sessionManager.readMessages(session.id);
+    if (allMessages.length === 0) return;
+
+    this.chat('system', '🗜️ Compacting conversation...');
+    try {
+      const { system, user } = buildCompactionPrompt(allMessages);
+      const response = await this.provider.chat(
+        [{ role: 'system', content: system }, { role: 'user', content: user }],
+        { maxTokens: 1500, temperature: 0 }
+      );
+      const summary = response.content.trim();
+      if (!summary) {
+        this.chat('error', 'Compaction failed: empty summary returned.');
+        return;
+      }
+
+      this.sessionManager.writeCompactionState(session.id, {
+        compactedThroughCount: allMessages.length,
+        summary,
+        compactedAt: new Date().toISOString()
+      });
+      this.sessionManager.updateContext(session.id, summary);
+      this.say('compactionApplied', { summary });
+      this.reportSessionSize(session);
+    } catch (e: any) {
+      this.chat('error', `Compaction failed: ${e.message || String(e)}`);
+    }
+  }
+
+  /** Runs an ordered multi-stage plan (see routeOrPlan) sequentially: each
+   *  stage is a full runAgentLoop call for its specialist, chained on the same
+   *  cosmetic graph (resetGraph only on the first stage) and verified before
+   *  the next stage starts. Stops — rather than building further stages on a
+   *  broken foundation — if a stage's verification fails or the stage was
+   *  aborted/errored before completing. */
+  private async runFeaturePipeline(stages: StagePlan[], session: Session, userMessage: string, promptId?: string): Promise<void> {
+    const resolved = stages.map(s => ({ agent: AGENTS.find(a => a.id === s.agentId) || GENERAL_AGENT, task: s.task }));
+    this.say('featurePlan', {
+      stages: resolved.map(s => ({ agentId: s.agent.id, label: s.agent.label, icon: s.agent.icon, task: s.task }))
+    });
+
+    let precedingRunId: string | undefined;
+    for (let i = 0; i < resolved.length; i++) {
+      if (this.aborted) break;
+      const { agent, task } = resolved[i];
+      this.say('featureStageStarted', { index: i, total: resolved.length, agentId: agent.id, label: agent.label, icon: agent.icon, task });
+
+      // baseHistory naturally carries forward prior stages' summaries once persisted,
+      // but nothing else tells the model its OWN stage's scope — this does.
+      this.sessionManager.appendMessage(session.id, {
+        role: 'user',
+        content: `[Pipeline — Stage ${i + 1}/${resolved.length}: ${agent.label}]\n${task}`
+      });
+
+      const outcome = await this.runAgentLoop(agent, session, task, {
+        verify: true,
+        resetGraph: i === 0,
+        precedingRunId,
+        graphLabelPrefix: `Stage ${i + 1}/${resolved.length}:`,
+        promptId
+      });
+      precedingRunId = outcome.runId;
+
+      this.say('featureStageFinished', {
+        index: i, total: resolved.length, agentId: agent.id, label: agent.label,
+        verificationPassed: outcome.verification?.passed ?? null
+      });
+
+      if (outcome.verification && outcome.verification.ran && !outcome.verification.passed) {
+        this.chat('system', `⏹️ Pipeline stopped after stage ${i + 1}/${resolved.length} (${agent.label}) — verification did not pass. Remaining stage(s) not started: ${resolved.slice(i + 1).map(s => s.agent.label).join(', ') || '(none)'}.`);
+        this.say('featurePipelineStopped', { atStage: i, reason: 'verification-failed' });
+        return;
+      }
+      if (!outcome.done) {
+        this.chat('system', `⏹️ Pipeline stopped after stage ${i + 1}/${resolved.length} (${agent.label}) — it was cancelled or hit a stream error before completing.`);
+        this.say('featurePipelineStopped', { atStage: i, reason: 'stage-incomplete' });
+        return;
+      }
+    }
+    this.say('featurePipelineFinished', { stages: resolved.length });
+  }
+
+  /** Runs one task-specialized agent's tool loop in isolation: its own tool
+   *  allowlist and its own in-memory transcript (`localHistory`) that is never
+   *  written turn-by-turn into the session's messages.jsonl. The loop keeps
+   *  running — with no step cap — until the model stops calling tools, the
+   *  user aborts, or a stream error occurs; a truncated response (the
+   *  provider's per-call output limit cut it off mid tool-call) is detected
+   *  and re-prompted automatically rather than ending the run. Only a single
+   *  summarized assistant turn is persisted to
+   *  the main session log when the run finishes; the full internal transcript
+   *  is written once to a side file for on-demand inspection. When
+   *  `opts.verify` is set, a harness-driven verification phase (migrate +
+   *  scoped tests, with bounded self-correction) runs before that summary is
+   *  finalized — see runVerificationPhase. */
+  private async runAgentLoop(
+    agent: AgentDefinition,
+    session: Session,
+    userMessage: string,
+    opts: RunAgentLoopOptions = {}
+  ): Promise<RunAgentLoopOutcome> {
+    const runId = this.sessionManager.generateRunId();
+    const baseHistory = this.sessionManager.buildEffectiveHistory(session.id);
+    const localHistory: Message[] = [];
+    const touchedFiles: TouchedFile[] = [];
+    const checkpoint: CheckpointEntry[] = [];
+    let lastAssistantText = '';
+    let step = 0;
+    let done = false;
+
+    // 1. Initialize Visual Workflow Graph Planner — one parent node per agent run.
+    if (this.graphStore) {
+      if (opts.resetGraph !== false) this.graphStore.init("Workflow Executor");
+      this.graphStore.addNode({
+        id: runId,
+        type: "reader",
+        label: `${opts.graphLabelPrefix ? opts.graphLabelPrefix + ' ' : ''}${agent.icon} ${agent.label}`,
+        description: agent.description,
+        status: "running",
+        progress: 30,
+        agentRunId: runId
+      });
+      if (opts.precedingRunId) this.graphStore.addEdge(opts.precedingRunId, runId, 'next stage');
+      this.say('graphUpdated', this.graphStore.get());
+    }
+
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const loopState = { malformedCount: 0, streamErrorCount: 0 };
+
+    while (!done) {
+      if (this.aborted) {
+        this.chat('system', '⏹️ Execution cancelled by user.');
+        break;
+      }
+      step++;
+      const stepResult = await this.runOneAgentStep(
+        agent, session, userMessage, baseHistory, localHistory, touchedFiles, checkpoint, runId, root, String(step), loopState
+      );
+      if (stepResult.assistantText.trim()) {
+        lastAssistantText = stepResult.assistantText;
+      }
+      done = stepResult.done;
+      if (stepResult.stopLoop) break;
+    }
+
+    let verification: VerificationOutcome | null = null;
+    if (opts.verify && done && touchedFiles.length > 0) {
+      const verifyResult = await this.runVerificationPhase(
+        agent, session, userMessage, baseHistory, localHistory, touchedFiles, checkpoint, runId, root, lastAssistantText
+      );
+      verification = verifyResult.outcome;
+      lastAssistantText = verifyResult.lastAssistantText;
+    }
+
+    // Finalize visual graph
+    if (this.graphStore) {
+      const verificationFailed = !!verification && verification.ran && !verification.passed;
+      this.graphStore.updateNode(runId, {
+        status: verificationFailed ? "failed" : "completed",
+        progress: 100,
+        details: verificationFailed ? "Verification failed" : undefined
+      });
+      this.graphStore.get().currentState = 'completed';
+      this.say('graphUpdated', this.graphStore.get());
+    }
+
+    // Fold the run back into the main transcript as exactly one summarized turn.
+    let summaryText = lastAssistantText;
+    if (!done) {
+      // Always surface *something* here — if the last step produced no text
+      // at all (e.g. it failed before any content streamed back), silently
+      // persisting nothing left the user staring at a run that just stopped
+      // with no explanation.
+      summaryText = (summaryText.trim() ? summaryText + '\n\n' : '') +
+        `_(execution stopped before completing — cancelled or a stream error occurred; see any error above)_`;
+    }
+    if (verification?.ran) {
+      summaryText += verification.passed
+        ? `\n\n---\n**Verification passed** (${verification.roundsUsed} attempt(s)).`
+        : `\n\n---\n**Verification FAILED** after ${verification.roundsUsed} attempt(s). Last error:\n\`\`\`\n${(verification.lastError || '').slice(0, 2000)}\n\`\`\``;
+    } else if (verification?.skippedReason) {
+      summaryText += `\n\n_(Verification skipped: ${verification.skippedReason}.)_`;
+    }
+    if (verification?.missingTestNotes.length) {
+      summaryText += `\n\n${verification.missingTestNotes.map(n => `_${n}_`).join('\n')}`;
+    }
+
+    if (summaryText.trim()) {
+      this.sessionManager.appendMessage(session.id, {
+        role: 'assistant',
+        content: summaryText,
+        agentId: agent.id,
+        runId,
+        hasCheckpoint: checkpoint.length > 0,
+        promptId: opts.promptId
+      });
+    }
+    this.sessionManager.writeRunTranscript(session.id, runId, localHistory);
+    if (checkpoint.length > 0) {
+      this.sessionManager.writeCheckpoint(session.id, runId, checkpoint);
+    }
+
+    return { runId, done, verification };
+  }
+
+  /** Runs a single reasoning + tool-dispatch step for one agent run. Extracted
+   *  out of runAgentLoop so verification's fix-rounds can reuse the exact same
+   *  step logic (approval flow, graph updates, tool allowlist gate) instead of
+   *  duplicating it. */
+  private async runOneAgentStep(
+    agent: AgentDefinition,
+    session: Session,
+    userMessage: string,
+    baseHistory: Message[],
+    localHistory: Message[],
+    touchedFiles: TouchedFile[],
+    checkpoint: CheckpointEntry[],
+    runId: string,
+    root: string,
+    stepLabel: string,
+    loopState: { malformedCount: number; streamErrorCount: number }
+  ): Promise<AgentStepResult> {
+    let ragContext = '';
+    if (this.vectorStore) {
+      try {
+        const results = await this.vectorStore.search(userMessage, 3);
+        if (results.length > 0) {
+          ragContext = `\n\n### Retrieved Documentation Context\nUse the following reference snippets to guide your implementation, ensuring you adhere to correct APIs and patterns:\n\n` +
+                       results.map(r => `--- [Source: ${r.source}] ---\n${r.text}`).join('\n\n');
+        }
+      } catch (e) {
+        console.error('Failed to run vector search:', e);
+      }
+    }
+
+    let schemaContext = '';
+    if (this.schemaMap) {
+      schemaContext = `\n\n### Active Workspace Schema Directory\nThe active site has the following properties:\n` +
+                      `- Installed Apps: ${this.schemaMap.apps.join(', ')}\n` +
+                      `- Active DocTypes: ${this.schemaMap.doctypes.join(', ')}\n` +
+                      `Verify if DocTypes or apps exist in this directory before proposing references or creating them.`;
+    }
+
+    let skillsCatalog = '';
+    if (this.skillsStore) {
+      const catalog = this.skillsStore.buildCatalog();
+      if (catalog) {
+        skillsCatalog = `\n\n### Available Skills\nCall 'use_skill' with an id below to load its full content when relevant:\n\n${catalog}`;
+      }
+    }
+
+    const messages = [
+      { role: 'system', content: buildSystemPrompt(agent) + ragContext + schemaContext + skillsCatalog },
+      ...baseHistory,
+      ...localHistory
+    ];
+
+    this.say('agentState', { state: 'running', phase: stepLabel === '1' ? 'Analyzing request...' : 'Continuing reasoning...' });
+
+    let fullContent = '';
+    try {
+      fullContent = await this.stream(messages);
+    } catch (e: any) {
+      loopState.streamErrorCount++;
+      if (loopState.streamErrorCount > MAX_CONSECUTIVE_STREAM_ERRORS) {
+        this.chat('error', `LLM Stream error (gave up after ${loopState.streamErrorCount} consecutive failures): ${e.message || String(e)}`);
+        return { done: false, assistantText: '', stopLoop: true };
+      }
+      this.chat('system', `⚠️ Stream error, retrying (attempt ${loopState.streamErrorCount}/${MAX_CONSECUTIVE_STREAM_ERRORS}): ${e.message || String(e)}`);
+      await new Promise(res => setTimeout(res, Math.min(2000 * loopState.streamErrorCount, 10000)));
+      return { done: false, assistantText: '', stopLoop: false };
+    }
+    loopState.streamErrorCount = 0;
+
+    if (fullContent.trim()) {
+      localHistory.push({ role: 'assistant', content: fullContent });
+    }
+
+    const toolCalls = this.parseToolCalls(fullContent);
+    if (toolCalls.length === 0) {
+      // A response can get cut off by the provider's output-length limit mid
+      // tool-call (e.g. while streaming a large write_file's <content>). The
+      // regex parser needs a matching closing tag, so a truncated call parses
+      // as zero calls — without this check that read as "the agent is done"
+      // and silently dropped the in-progress work, requiring the user to type
+      // "continue" to resume. Detect the dangling opening tag and loop again
+      // instead of ending the run.
+      const openCount = (fullContent.match(/<tool_call\s+name="/g) || []).length;
+      const closeCount = (fullContent.match(/<\/tool_call>/g) || []).length;
+      if (openCount > closeCount) {
+        localHistory.push({
+          role: 'user',
+          content: 'Your previous response was cut off by the output length limit before finishing, so no tool call was executed. Continue and re-send that tool call in full.'
+        });
+        return { done: false, assistantText: fullContent, stopLoop: false };
+      }
+
+      // A weaker/free model can drift into its own native function-calling
+      // syntax (e.g. "<invoke name=...><parameter name=...>") instead of the
+      // "<tool_call name=...>" format this app's tool loop actually parses,
+      // sometimes with raw undecoded special tokens (seen in practice as a
+      // literal "DSML" placeholder, or stray "|"/"｜" pipe characters)
+      // spliced into the tag scaffolding — e.g.
+      // "< | DSML | parameter name=\"path\">/</ | DSML | parameter>". None
+      // of that matches parseToolCalls, so without this check it was
+      // accepted as a genuine finished answer and shown to the user
+      // verbatim. Match loosely (words allowed to trail a "<"/"</" by a few
+      // stray characters, not just immediately) and correct the model
+      // instead of ending the run on garbage.
+      const looksLikeMalformedToolCall =
+        /<\s*\/?[^a-zA-Z\n]{0,6}(invoke|parameter)\b/i.test(fullContent) ||
+        /\bDSML\b/i.test(fullContent);
+      if (looksLikeMalformedToolCall) {
+        loopState.malformedCount++;
+        if (loopState.malformedCount > MAX_CONSECUTIVE_MALFORMED_TOOL_CALLS) {
+          // More retries won't fix a model/provider that can't emit the
+          // expected format at all — stop and say so plainly instead of
+          // spinning silently (distinct from the unbounded main loop, which
+          // is fine to keep retrying real, in-progress work indefinitely).
+          return {
+            done: true,
+            stopLoop: true,
+            assistantText: `${fullContent}\n\n---\n**Stopped:** the model repeated an invalid/garbled tool-call format ${loopState.malformedCount} times in a row instead of using this app's expected format. This usually means the current model doesn't support this app's tool-calling protocol reliably — try switching models (\`/model\`) rather than retrying.`
+          };
+        }
+        localHistory.push({
+          role: 'user',
+          content: 'Your previous response used an invalid tool-call format (garbled or wrong syntax) and was not executed. You must use exactly this format, with no other function-calling syntax, tokens, or extra characters: <tool_call name="TOOL_NAME"><param_name>value</param_name></tool_call>. Retry the tool call now in that exact format.'
+        });
+        return { done: false, assistantText: fullContent, stopLoop: false };
+      }
+      loopState.malformedCount = 0;
+      return { done: true, assistantText: fullContent, stopLoop: true };
+    }
+    loopState.malformedCount = 0;
+
+    for (let idx = 0; idx < toolCalls.length; idx++) {
+      const tool = toolCalls[idx];
+      // Tell UI we are starting tool call
+      this.say('toolCallStarted', { tool: tool.name, args: tool.args });
+
+      // Add node for this step in visual graph, nested under this run
+      const nodeId = `tool-${stepLabel}-${idx}-${tool.name}`;
+      if (this.graphStore) {
+        this.graphStore.addNode({
+          id: nodeId,
+          type: "chunk",
+          label: `${tool.name}`,
+          description: `Args: ${Object.keys(tool.args).join(', ')}`,
+          status: "running",
+          progress: 50,
+          agentRunId: runId
+        });
+        this.graphStore.addEdge(runId, nodeId);
+        this.say('graphUpdated', this.graphStore.get());
+      }
+
+      let resultOutput = '';
+      if (!agent.allowedTools.includes(tool.name as ToolName)) {
+        // Hard allowlist gate — covers control-flow tools (ask_clarification,
+        // update_todo_list) too, not just tools routed through ToolExecutor.
+        resultOutput = `Tool '${tool.name}' is not permitted for the ${agent.label} agent. Available tools: ${agent.allowedTools.join(', ')}`;
+        if (this.graphStore) {
+          this.graphStore.updateNode(nodeId, { status: "failed", details: "Not in this agent's tool allowlist." });
+          this.say('graphUpdated', this.graphStore.get());
+        }
+        this.say('toolFinished', { tool: tool.name, success: false, output: resultOutput });
+      } else {
+        let approved = true;
+        const isHighRisk = agent.highRiskTools.includes(tool.name as ToolName);
+        if (isHighRisk) {
+          let diffPayload: { fileExisted?: boolean; diffHunks?: any[] } = {};
+          if (tool.name === 'write_file' && tool.args.path) {
+            const absPath = path.resolve(root, tool.args.path);
+            const fileExisted = fs.existsSync(absPath);
+            const oldContent = fileExisted ? (this.readFileCapped(absPath) ?? '') : '';
+            diffPayload = { fileExisted, diffHunks: diffLines(oldContent, tool.args.content || '') };
+          }
+          this.say('toolApprovalRequired', { tool: tool.name, args: tool.args, ...diffPayload });
+          approved = await this.waitForApproval(tool.name, tool.args);
+        }
+
+        if (tool.name === 'update_todo_list') {
+          const tasksText = tool.args.tasks || '';
+          const tasks = this.parseTodoList(tasksText);
+          this.todoList = tasks;
+          this.say('todoListUpdated', { tasks: this.todoList });
+          resultOutput = `Todo list updated with ${tasks.length} items.`;
+
+          if (this.graphStore) {
+            this.graphStore.updateNode(nodeId, {
+              status: "completed",
+              progress: 100
+            });
+            this.say('graphUpdated', this.graphStore.get());
+          }
+          this.say('toolFinished', { tool: tool.name, success: true, output: resultOutput });
+        } else if (tool.name === 'ask_clarification') {
+          const questionsText = tool.args.questions || tool.args.question || '';
+          this.say('showClarificationPopup', { questions: questionsText });
+          this.say('agentState', { state: 'paused' });
+
+          const answersText = await new Promise<string>((resolve) => {
+            this.pendingClarification = { resolve };
+          });
+
+          resultOutput = answersText;
+
+          if (this.graphStore) {
+            this.graphStore.updateNode(nodeId, {
+              status: "completed",
+              progress: 100
+            });
+            this.say('graphUpdated', this.graphStore.get());
+          }
+          this.say('toolFinished', { tool: tool.name, success: true, output: resultOutput });
+        } else if (approved) {
+          this.say('toolExecuting', { tool: tool.name });
+
+          // Before-image capture for revert — must happen before the write
+          // actually executes. Captured unconditionally (even if the write
+          // later fails); reverting a no-op change is harmless.
+          if ((tool.name === 'write_file' || tool.name === 'edit_file') && tool.args.path) {
+            const absPath = path.resolve(root, tool.args.path);
+            const existedBefore = fs.existsSync(absPath);
+            checkpoint.push({
+              path: tool.args.path,
+              existedBefore,
+              originalContent: existedBefore ? (this.readFileCapped(absPath) ?? undefined) : undefined
+            });
+          }
+
+          const result = await this.toolExecutor.runTool(tool.name, tool.args, agent.allowedTools);
+          resultOutput = result.output;
+
+          // Compile validation & touched-file tracking (for the end-of-run verification phase)
+          let validationOutput = '';
+          if (result.success && (tool.name === 'write_file' || tool.name === 'edit_file')) {
+            const absPath = path.resolve(root, tool.args.path);
+            touchedFiles.push(classifyTouchedFile(tool.args.path, absPath));
+
+            const ext = path.extname(tool.args.path);
+            if (ext === '.py' || ext === '.js') {
+              const validateCmd = ext === '.py'
+                ? `python -m py_compile "${absPath}"`
+                : `node -c "${absPath}"`;
+
+              const valResult = await this.toolExecutor.executeCommand(validateCmd);
+              if (!valResult.success) {
+                validationOutput = `\n\n[LINTER WARNING] File compiled with error:\n${valResult.output}`;
+                this.chat('error', `⚠️ Linter warning on ${tool.args.path}: compilation check failed.`);
+
+                if (this.graphStore) {
+                  this.graphStore.updateNode(nodeId, {
+                    status: "failed",
+                    details: "Compilation validation failed."
+                  });
+                  this.say('graphUpdated', this.graphStore.get());
+                }
+              }
+            }
+          }
+
+          resultOutput += validationOutput;
+
+          if (this.graphStore && !validationOutput) {
+            this.graphStore.updateNode(nodeId, {
+              status: result.success ? "completed" : "failed",
+              progress: 100
+            });
+            this.say('graphUpdated', this.graphStore.get());
+          }
+
+          this.say('toolFinished', { tool: tool.name, success: result.success && !validationOutput, output: resultOutput });
+        } else {
+          resultOutput = 'Tool execution rejected by the user.';
+
+          if (this.graphStore) {
+            this.graphStore.updateNode(nodeId, {
+              status: "failed",
+              details: "Rejected by user."
+            });
+            this.say('graphUpdated', this.graphStore.get());
+          }
+
+          this.say('toolFinished', { tool: tool.name, success: false, output: resultOutput });
+        }
+      }
+
+      // Append tool result to this run's own local transcript (not the main session log)
+      const resultMsg = `<tool_result name="${tool.name}">\n${resultOutput}\n</tool_result>`;
+      localHistory.push({ role: 'user', content: resultMsg });
+    }
+
+    return { done: false, assistantText: fullContent, stopLoop: false };
+  }
+
+  /** Harness-driven verification: runs bench migrate / scoped tests directly
+   *  via ToolExecutor (never through the model's own tool-calling — this is
+   *  why it applies regardless of whether `agent.allowedTools` includes
+   *  execute_command), gated behind one approval prompt per run. On failure,
+   *  feeds the real error back into the loop as a synthetic tool result and
+   *  gives the agent a small, separate step budget to fix it, up to
+   *  VERIFY_MAX_ROUNDS times, before giving up and reporting failure honestly. */
+  private async runVerificationPhase(
+    agent: AgentDefinition,
+    session: Session,
+    userMessage: string,
+    baseHistory: Message[],
+    localHistory: Message[],
+    touchedFiles: TouchedFile[],
+    checkpoint: CheckpointEntry[],
+    runId: string,
+    root: string,
+    initialLastAssistantText: string
+  ): Promise<{ outcome: VerificationOutcome; lastAssistantText: string }> {
+    let lastAssistantText = initialLastAssistantText;
+    const skip = (reason: string, missingTestNotes: string[] = []): { outcome: VerificationOutcome; lastAssistantText: string } => ({
+      outcome: { ran: false, passed: true, roundsUsed: 0, missingTestNotes, skippedReason: reason },
+      lastAssistantText
+    });
+
+    const site = readConfig()?.defaultSite;
+    if (!site || !this.benchEnv || this.benchEnv.type === 'not-found') {
+      return skip('no site or bench environment configured');
+    }
+
+    const plan = buildVerificationPlan(touchedFiles, root);
+    if (!plan.shouldMigrate && plan.testCommands.length === 0) {
+      return { outcome: { ran: false, passed: true, roundsUsed: 0, missingTestNotes: plan.missingTestNotes }, lastAssistantText };
+    }
+
+    this.say('verifyApprovalRequired', {
+      runId,
+      willMigrate: plan.shouldMigrate,
+      testCommands: plan.testCommands.map(t => t.description)
+    });
+    const approved = await this.waitForApproval('verify_run', { runId });
+    if (!approved) {
+      return { outcome: { ran: false, passed: true, roundsUsed: 0, missingTestNotes: plan.missingTestNotes, skippedReason: 'declined by user' }, lastAssistantText };
+    }
+
+    let roundsUsed = 0;
+    let lastError = '';
+    let passed = false;
+    const loopState = { malformedCount: 0, streamErrorCount: 0 };
+
+    for (let round = 0; round <= VERIFY_MAX_ROUNDS && !passed; round++) {
+      roundsUsed = round + 1;
+      this.say('verifyRunning', { runId, round: roundsUsed });
+
+      let roundOutput = '';
+      let roundFailed = false;
+
+      if (plan.shouldMigrate) {
+        const result = await this.toolExecutor.executeCommand(migrateCmd(site));
+        roundOutput += `[migrate]\n${result.output}\n`;
+        if (!result.success) roundFailed = true;
+      }
+      if (!roundFailed) {
+        for (const testCmd of plan.testCommands) {
+          const result = await this.toolExecutor.executeCommand(testCmd.command(site));
+          roundOutput += `[${testCmd.description}]\n${result.output}\n`;
+          if (!result.success) { roundFailed = true; break; }
+        }
+      }
+
+      if (!roundFailed) {
+        passed = true;
+        break;
+      }
+
+      lastError = roundOutput;
+      if (round >= VERIFY_MAX_ROUNDS) break;
+
+      const fixPrompt = `<tool_result name="verify_run">\n[VERIFICATION FAILED - round ${roundsUsed}]\n${roundOutput}\nFix the issue above, then finish this turn (no further tool calls) once done. Verification will re-run automatically.\n</tool_result>`;
+      localHistory.push({ role: 'user', content: fixPrompt });
+
+      for (let fixStep = 1; fixStep <= VERIFY_FIX_STEP_BUDGET; fixStep++) {
+        if (this.aborted) break;
+        const stepResult = await this.runOneAgentStep(
+          agent, session, userMessage, baseHistory, localHistory, touchedFiles, checkpoint, runId, root, `fix-${roundsUsed}-${fixStep}`, loopState
+        );
+        if (stepResult.assistantText.trim()) lastAssistantText = stepResult.assistantText;
+        if (stepResult.done) break;
+      }
+      if (this.aborted) break;
+    }
+
+    const outcome: VerificationOutcome = {
+      ran: true,
+      passed,
+      roundsUsed,
+      missingTestNotes: plan.missingTestNotes,
+      lastError: passed ? undefined : lastError
+    };
+    this.say('verifyResult', {
+      runId, passed: outcome.passed, roundsUsed: outcome.roundsUsed,
+      missingTestNotes: outcome.missingTestNotes, lastError: outcome.lastError
+    });
+    return { outcome, lastAssistantText };
   }
 
   private async stream(msgs: { role: string; content: string }[]): Promise<string> {
     var full = '', fullReasoning = '', id = '' + Date.now();
     this.panel?.webview.postMessage({ type: 'startStream', messageId: id });
     try {
-      const options: any = {};
+      const options: any = { maxTokens: 8192 };
       if (this.activeModel) {
         options.model = this.activeModel;
       }

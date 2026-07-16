@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { Message, Session } from '../types';
+import { Message, Session, CompactionState, CheckpointEntry } from '../types';
 
 const SESSIONS_DIR = 'sessions';
 
@@ -177,6 +177,97 @@ export class SessionStore {
       return fs.readFileSync(ctxPath, 'utf-8');
     } catch {
       return null;
+    }
+  }
+
+  // ─── Sub-agent run transcripts ────────────────────────────────────────────
+
+  /** Generate a run id for a sub-agent execution, mirroring generateId()'s shape. */
+  generateRunId(): string {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substring(2, 6);
+    return `run-${timestamp}-${random}`;
+  }
+
+  /** Write a sub-agent's full internal transcript (system-prompt-excluded — see
+   *  callers) to a side file, keeping the main messages.jsonl free of per-step
+   *  tool-call noise. Written once, whole, when the run completes. */
+  writeRunTranscript(sessionId: string, runId: string, entries: Message[]): boolean {
+    const runsDir = path.join(this.sessionsDir, sessionId, 'runs');
+    try {
+      fs.mkdirSync(runsDir, { recursive: true });
+      const lines = entries.map(e => JSON.stringify(e)).join('\n') + '\n';
+      fs.writeFileSync(path.join(runsDir, `${runId}.jsonl`), lines, 'utf-8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Read a previously written sub-agent run transcript for on-demand UI expansion. */
+  readRunTranscript(sessionId: string, runId: string): Message[] {
+    const runPath = path.join(this.sessionsDir, sessionId, 'runs', `${runId}.jsonl`);
+    if (!fs.existsSync(runPath)) return [];
+    try {
+      const content = fs.readFileSync(runPath, 'utf-8').trim();
+      if (!content) return [];
+      return content.split('\n').map(line => JSON.parse(line) as Message);
+    } catch {
+      return [];
+    }
+  }
+
+  // ─── Compaction state ─────────────────────────────────────────────────────
+
+  private compactionPath(sessionId: string): string {
+    return path.join(this.sessionsDir, sessionId, 'compaction.json');
+  }
+
+  /** Persist "summarize and replace" state — messages.jsonl itself is never touched. */
+  writeCompactionState(sessionId: string, state: CompactionState): boolean {
+    try {
+      fs.writeFileSync(this.compactionPath(sessionId), JSON.stringify(state, null, 2), 'utf-8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  readCompactionState(sessionId: string): CompactionState | null {
+    const p = this.compactionPath(sessionId);
+    if (!fs.existsSync(p)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(p, 'utf-8')) as CompactionState;
+    } catch {
+      return null;
+    }
+  }
+
+  // ─── Run checkpoints (for revert) ─────────────────────────────────────────
+
+  private checkpointPath(sessionId: string, runId: string): string {
+    return path.join(this.sessionsDir, sessionId, 'runs', `${runId}.checkpoint.json`);
+  }
+
+  /** Persist the before-image of every file a run touched, so it can be reverted later. */
+  writeCheckpoint(sessionId: string, runId: string, entries: CheckpointEntry[]): boolean {
+    const runsDir = path.join(this.sessionsDir, sessionId, 'runs');
+    try {
+      fs.mkdirSync(runsDir, { recursive: true });
+      fs.writeFileSync(this.checkpointPath(sessionId, runId), JSON.stringify(entries, null, 2), 'utf-8');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  readCheckpoint(sessionId: string, runId: string): CheckpointEntry[] {
+    const p = this.checkpointPath(sessionId, runId);
+    if (!fs.existsSync(p)) return [];
+    try {
+      return JSON.parse(fs.readFileSync(p, 'utf-8')) as CheckpointEntry[];
+    } catch {
+      return [];
     }
   }
 

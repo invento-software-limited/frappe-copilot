@@ -50,6 +50,14 @@
       {
         "command": "frappe-copilot.mentionCode",
         "title": "Frappe Copilot: Mention Selected Code"
+      },
+      {
+        "command": "frappe-copilot.newSkill",
+        "title": "Frappe Copilot: New Skill"
+      },
+      {
+        "command": "frappe-copilot.importSkill",
+        "title": "Frappe Copilot: Import Skill (.md/.zip)"
       }
     ],
     "viewsContainers": {
@@ -67,6 +75,11 @@
           "type": "tree",
           "id": "frappe-copilot.sessions",
           "name": "Sessions"
+        },
+        {
+          "type": "tree",
+          "id": "frappe-copilot.skills",
+          "name": "Skills"
         },
         {
           "type": "tree",
@@ -204,6 +217,22 @@
           "type": "boolean",
           "default": false,
           "description": "Enable Claude extended (adaptive) thinking. Thinking output is shown in a separate collapsible 'Thought Process' section instead of the main reply."
+        },
+        "frappe-copilot.multiAgent.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Route each request to a task-specialized agent (DocType/Schema Builder, Server-side Logic, Client-side/UI, Bench/DevOps & Debug, Research, Architecture/Planning) instead of one general-purpose agent, and recognize multi-domain requests as an ordered multi-agent pipeline. Each agent run offers to self-verify (bench migrate + any existing tests, with a few bounded self-correction attempts on failure) before reporting done. Requests that don't confidently match a specialist still fall back to the General agent."
+        },
+        "frappe-copilot.compaction.thresholdTokens": {
+          "type": "number",
+          "default": 40000,
+          "description": "Estimated token count (of what would actually be sent to the model) above which Frappe Copilot offers to compact the conversation. Compaction only ever summarizes what gets sent going forward — the full raw conversation on disk is never deleted.",
+          "minimum": 2000
+        },
+        "frappe-copilot.compaction.autoOffer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a dismissible banner offering to compact the conversation once it crosses the token threshold. Compaction is never applied automatically without this prompt — you can always trigger it manually via /compact regardless of this setting."
         }
       }
     },
@@ -220,6 +249,16 @@
         {
           "command": "frappe-copilot.newSession",
           "when": "view == frappe-copilot.sessions",
+          "group": "navigation"
+        },
+        {
+          "command": "frappe-copilot.newSkill",
+          "when": "view == frappe-copilot.skills",
+          "group": "navigation"
+        },
+        {
+          "command": "frappe-copilot.importSkill",
+          "when": "view == frappe-copilot.skills",
           "group": "navigation"
         }
       ],
@@ -239,12 +278,16 @@
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {
+    "@types/diff": "^5.2.3",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.3.0"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.208",
+    "@types/adm-zip": "^0.5.8",
+    "adm-zip": "^0.5.18",
+    "diff": "^5.2.2",
     "pdfjs-dist": "^4.0.379"
   }
 }

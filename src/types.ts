@@ -7,6 +7,18 @@ export type ModelRole = 'chat' | 'planning' | 'coding' | 'vision';
 export interface Message {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Set on the summary message a task-specialized agent leaves in the main
+   *  transcript — lets the UI show which specialist handled the turn and
+   *  fetch its full step-by-step run via `runId` (see SessionStore.readRunTranscript). */
+  agentId?: string;
+  runId?: string;
+  /** Set alongside `runId` when that run has a revertible file checkpoint. */
+  hasCheckpoint?: boolean;
+  /** Shared across the user message and every assistant run it spawns (one
+   *  user message can fan out into several runs via a multi-stage pipeline).
+   *  Lets "revert changes from this prompt" aggregate every checkpoint that
+   *  prompt produced, not just a single run's. */
+  promptId?: string;
 }
 
 /** Options passed to a provider chat call. */
@@ -94,6 +106,22 @@ export interface Session {
   createdAt: string;
   updatedAt: string;
   messageCount: number;
+}
+
+/** Persisted "summarize and replace" compaction state for a session — the raw
+ *  messages.jsonl is never touched; this just tells buildEffectiveHistory()
+ *  where to cut over from full history to summary + tail. */
+export interface CompactionState {
+  compactedThroughCount: number;
+  summary: string;
+  compactedAt: string;
+}
+
+/** Before-image of one file touched by an agent run, for revert. */
+export interface CheckpointEntry {
+  path: string;
+  existedBefore: boolean;
+  originalContent?: string;
 }
 
 // ─── Workspace Config ─────────────────────────────────────────────────────────

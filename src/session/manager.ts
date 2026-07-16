@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Session, Message } from '../types';
+import { Session, Message, CompactionState, CheckpointEntry } from '../types';
 import { SessionStore } from './store';
 
 /**
@@ -97,6 +97,52 @@ export class SessionManager implements vscode.TreeDataProvider<SessionItem> {
   /** Read all messages from a session. */
   readMessages(sessionId: string): Message[] {
     return this.store.readMessages(sessionId);
+  }
+
+  /** Generate a new sub-agent run id. */
+  generateRunId(): string {
+    return this.store.generateRunId();
+  }
+
+  /** Persist a sub-agent's full internal transcript as a side file. */
+  writeRunTranscript(sessionId: string, runId: string, entries: Message[]): boolean {
+    return this.store.writeRunTranscript(sessionId, runId, entries);
+  }
+
+  /** Read a sub-agent run's full transcript back (for on-demand UI expansion). */
+  readRunTranscript(sessionId: string, runId: string): Message[] {
+    return this.store.readRunTranscript(sessionId, runId);
+  }
+
+  writeCompactionState(sessionId: string, state: CompactionState): boolean {
+    return this.store.writeCompactionState(sessionId, state);
+  }
+
+  readCompactionState(sessionId: string): CompactionState | null {
+    return this.store.readCompactionState(sessionId);
+  }
+
+  writeCheckpoint(sessionId: string, runId: string, entries: CheckpointEntry[]): boolean {
+    return this.store.writeCheckpoint(sessionId, runId, entries);
+  }
+
+  readCheckpoint(sessionId: string, runId: string): CheckpointEntry[] {
+    return this.store.readCheckpoint(sessionId, runId);
+  }
+
+  /** The history actually sent to the model: full raw history, unless this
+   *  session has been compacted, in which case it's the summary (as a
+   *  synthetic system message) followed by only the turns after the
+   *  compaction boundary. readMessages()/loadSession() are unaffected — the
+   *  full raw record on disk never changes, only what gets SENT shrinks. */
+  buildEffectiveHistory(sessionId: string): Message[] {
+    const state = this.store.readCompactionState(sessionId);
+    const all = this.store.readMessages(sessionId);
+    if (!state) return all;
+    return [
+      { role: 'system', content: `### Prior conversation summary\n${state.summary}` },
+      ...all.slice(state.compactedThroughCount)
+    ];
   }
 
   /** Read the context markdown from a session. */

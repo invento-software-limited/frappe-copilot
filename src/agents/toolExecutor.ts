@@ -3,7 +3,9 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { exec, spawn } from 'child_process';
 import { BenchEnvironment } from '../types';
+import { ToolName } from './types';
 import { readConfig } from '../workspace/structure';
+import { SkillsStore } from './skillsStore';
 
 export interface ToolResult {
   success: boolean;
@@ -13,15 +15,23 @@ export interface ToolResult {
 export class ToolExecutor {
   constructor(
     private workspaceRoot: string,
-    private benchEnv: BenchEnvironment | null
+    private benchEnv: BenchEnvironment | null,
+    private skillsStore: SkillsStore | null = null
   ) {}
 
   setBenchEnv(env: BenchEnvironment | null) {
     this.benchEnv = env;
   }
 
-  /** Run a tool by name and arguments */
-  async runTool(name: string, args: Record<string, string>): Promise<ToolResult> {
+  /** Run a tool by name and arguments. `allowedTools` is the calling agent's
+   *  tool allowlist — enforced here as the authoritative check regardless of
+   *  what the model was prompted with, since a prompt only constrains the
+   *  model's own reasoning, not adversarial content reflected back through a
+   *  prior tool result (e.g. injected instructions in a fetched web page). */
+  async runTool(name: string, args: Record<string, string>, allowedTools: ToolName[]): Promise<ToolResult> {
+    if (!allowedTools.includes(name as ToolName)) {
+      return { success: false, output: `Tool '${name}' is not permitted for this agent. Available tools: ${allowedTools.join(', ')}` };
+    }
     try {
       switch (name) {
         case 'read_file':
@@ -42,6 +52,8 @@ export class ToolExecutor {
           return await this.webSearch(args.query);
         case 'web_fetch':
           return await this.webFetch(args.url);
+        case 'use_skill':
+          return await this.useSkill(args.id);
         default:
           return { success: false, output: `Unknown tool: ${name}` };
       }
@@ -388,6 +400,14 @@ export class ToolExecutor {
     } catch (e: any) {
       return { success: false, output: `Web search error: ${e.message || String(e)}` };
     }
+  }
+
+  async useSkill(id: string): Promise<ToolResult> {
+    if (!id) return { success: false, output: 'Missing id parameter' };
+    if (!this.skillsStore) return { success: false, output: 'Skills system not initialized for this workspace.' };
+    const content = this.skillsStore.readSkill(id);
+    if (content === null) return { success: false, output: `No skill found with id '${id}'.` };
+    return { success: true, output: content };
   }
 
   async webFetch(urlStr: string): Promise<ToolResult> {
