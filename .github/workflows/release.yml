@@ -40,7 +40,7 @@ jobs:
         run: npm run lint
 
       - name: Package extension (.vsix)
-        run: npx @vscode/vsce package --out frappe-copilot-${{ github.ref_name }}.vsix
+        run: npx @vscode/vsce package --allow-missing-repository --skip-license --out frappe-copilot-${{ github.ref_name }}.vsix
 
       - name: Determine release tag
         id: tag
