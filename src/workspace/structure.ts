@@ -47,7 +47,7 @@ export function initializeWorkspaceStructure(): string | null {
         model: 'deepseek-v4-flash-free',
         temperature: 0.7,
       },
-      version: '0.1.0',
+      version: '1.0.0',
     };
     fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
   }
