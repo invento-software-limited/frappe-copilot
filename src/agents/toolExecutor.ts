@@ -6,6 +6,7 @@ import { BenchEnvironment } from '../types';
 import { ToolName } from './types';
 import { readConfig } from '../workspace/structure';
 import { SkillsStore } from './skillsStore';
+import { isAutoApprove } from './approvalMode';
 
 export interface ToolResult {
   success: boolean;
@@ -68,6 +69,7 @@ export class ToolExecutor {
     fullPath = path.normalize(fullPath);
     const normalizedRoot = path.normalize(activeRoot);
     if (!fullPath.startsWith(normalizedRoot)) {
+      if (isAutoApprove()) return fullPath;
       const choice = await vscode.window.showWarningMessage(
         `Frappe Copilot wants to access file/directory outside the workspace root: '${fullPath}'. Do you allow this?`,
         'Allow',
@@ -91,12 +93,14 @@ export class ToolExecutor {
       return { success: false, output: `'${relPath}' is a directory. Use list_dir tool instead.` };
     }
 
-    // Add size guardrail: limit to 1MB
-    const maxBytes = 1 * 1024 * 1024; // 1MB
+    // Size guardrail: a 1MB file is ~250k tokens in a single tool result, which
+    // alone can blow a step's context budget. 150KB (~35k tokens) still covers
+    // any real source file while keeping one read_file call from dominating the prompt.
+    const maxBytes = 150 * 1024;
     if (stat.size > maxBytes) {
       return {
         success: false,
-        output: `Error: File '${relPath}' is too large (${(stat.size / 1024 / 1024).toFixed(2)}MB). Maximum allowed file size to read is 1.00MB to prevent token limit crashes.`
+        output: `Error: File '${relPath}' is too large (${(stat.size / 1024).toFixed(0)}KB). Maximum allowed file size to read is ${(maxBytes / 1024).toFixed(0)}KB to prevent token limit crashes. Use grep_search to find relevant sections instead of reading the whole file.`
       };
     }
 

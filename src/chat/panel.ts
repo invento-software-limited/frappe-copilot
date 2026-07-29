@@ -1,15 +1,17 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { LLMProvider } from '../providers/interface';
 import { runClaudeOAuthFlow } from '../providers/anthropicOAuth';
 import { SessionManager } from '../session/manager';
-import { BenchEnvironment, Session, Message, CheckpointEntry } from '../types';
+import { BenchEnvironment, Session, Message, CheckpointEntry, ImageAttachment } from '../types';
 import { readIntakeFile } from '../intake/fileReader';
 import { ToolExecutor } from '../agents/toolExecutor';
 import { buildSystemPrompt } from '../agents/prompts';
 import { AgentDefinition, ToolName } from '../agents/types';
 import { AGENTS, GENERAL_AGENT } from '../agents/registry';
+import { getApprovalMode, isAutoApprove, ApprovalMode } from '../agents/approvalMode';
 import { ROUTER_CONTEXT_TURNS } from '../agents/router';
 import { routeOrPlan, StagePlan } from '../agents/planner';
 import {
@@ -43,6 +45,20 @@ const MAX_CONSECUTIVE_MALFORMED_TOOL_CALLS = 5;
  *  this many *consecutive* step-level failures, so a real outage/rate limit
  *  still ends the run rather than spinning forever. */
 const MAX_CONSECUTIVE_STREAM_ERRORS = 5;
+
+/** The image formats every vision-capable provider here accepts. An extension
+ *  outside this map falls through to the text-extraction path. */
+const IMAGE_MEDIA_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+};
+
+/** Anthropic rejects images over ~5MB. Checked before the request so the user
+ *  gets a clear message instead of an opaque 400 mid-run. */
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 /** Rough, deliberately conservative single default — this codebase has no
  *  per-model context-window registry, and building one is out of scope for a
@@ -85,6 +101,9 @@ export class ChatPanel {
   private vectorStore: VectorStore | null = null;
   private graphStore: GraphStore | null = null;
   private skillsStore: SkillsStore | null = null;
+  /** Auto-selected skill content for the run in flight — computed once per run
+   *  so the system prompt stays cache-stable across its steps. */
+  private activeSkillContext = '';
   private schemaMap: { doctypes: string[], apps: string[] } | null = null;
   private pendingApproval: { resolve: (approved: boolean) => void } | null = null;
   private pendingClarification: { resolve: (answers: string) => void } | null = null;
@@ -190,6 +209,47 @@ export class ChatPanel {
     if (!this.skillsStore) return;
     const skills = this.skillsStore.listSkills();
     this.say('skillsList', { skills });
+  }
+
+  /** Announces a newly created/imported skill in the chat transcript, so the
+   *  library growing is visible where the user is actually working rather than
+   *  only in the Skills tree. */
+  notifySkillCreated(id: string): void {
+    const meta = this.skillsStore?.listSkills().find(s => s.id === id);
+    this.notifySkillsChanged();
+    this.say('skillEvent', {
+      kind: 'created',
+      id,
+      name: meta?.name || id,
+      description: meta?.description || ''
+    });
+  }
+
+  /** Loads the skills whose descriptions match `userMessage` and returns them as
+   *  a system-prompt section. Each one is announced in the chat so it is obvious
+   *  which guidance the answer was written against. Returns '' when nothing
+   *  scores highly enough — the common case for chitchat and short follow-ups. */
+  private buildAutoSkillContext(userMessage: string): string {
+    if (!this.skillsStore) return '';
+
+    let picked: { id: string; name: string; content: string }[] = [];
+    try {
+      picked = this.skillsStore.suggestSkills(userMessage)
+        .map(meta => ({ meta, content: this.skillsStore!.readSkill(meta.id) }))
+        .filter(s => !!s.content && !s.content!.startsWith('Error:'))
+        .map(s => ({ id: s.meta.id, name: s.meta.name, content: s.content! }));
+    } catch (e) {
+      console.error('Auto skill selection failed:', e);
+      return '';
+    }
+    if (picked.length === 0) return '';
+
+    for (const s of picked) {
+      this.say('skillEvent', { kind: 'loaded', id: s.id, name: s.name, auto: true });
+    }
+
+    return `\n\n### Auto-Loaded Skills\nThese were selected automatically as relevant to the request — treat them as authoritative for the topics they cover, and do not call use_skill for them again:\n\n` +
+      picked.map(s => `--- [Skill: ${s.id}] ---\n${s.content}`).join('\n\n');
   }
 
   private getWebviewContent(): string {
@@ -308,6 +368,44 @@ export class ChatPanel {
       case 'selectModel':
         this.activeModel = msg.model;
         break;
+      case 'setApprovalMode': {
+        const mode: ApprovalMode = msg.mode === 'auto' ? 'auto' : 'ask';
+        // Global rather than workspace scope so the choice isn't silently lost
+        // when switching between benches/apps.
+        await vscode.workspace.getConfiguration('frappe-copilot')
+          .update('approvalMode', mode, vscode.ConfigurationTarget.Global);
+        this.say('approvalMode', { mode });
+        this.chat('system', mode === 'auto'
+          ? '⚡ **Auto mode on.** File writes, edits, commands, and verification will run without asking. Changes are still checkpointed, so a run can be reverted.'
+          : '🛡️ **Ask mode on.** High-risk actions will pause for your approval.');
+        break;
+      }
+      case 'getApprovalMode':
+        this.say('approvalMode', { mode: getApprovalMode() });
+        break;
+      case 'saveFile': {
+        // A webview iframe is sandboxed without allow-downloads, so the usual
+        // blob-URL + anchor.click() trick silently does nothing — the save has
+        // to happen on the extension host.
+        if (!msg.data) break;
+        const defaultName = msg.defaultName || 'download';
+        const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
+        const uri = await vscode.window.showSaveDialog({
+          defaultUri: vscode.Uri.file(path.join(root, defaultName)),
+          saveLabel: 'Save'
+        });
+        if (!uri) break;
+        try {
+          const buffer = msg.encoding === 'base64'
+            ? Buffer.from(msg.data, 'base64')
+            : Buffer.from(msg.data, 'utf8');
+          fs.writeFileSync(uri.fsPath, buffer);
+          vscode.window.showInformationMessage(`Frappe Copilot: saved ${path.basename(uri.fsPath)}`);
+        } catch (e: any) {
+          vscode.window.showErrorMessage(`Frappe Copilot: could not save file — ${e.message || e}`);
+        }
+        break;
+      }
       case 'setApiKey':
         if (msg.key && msg.key.trim()) {
           await (this.provider as any).setApiKey(msg.key.trim());
@@ -529,6 +627,25 @@ export class ChatPanel {
     const filePath = path.join(this.uploadsDir, Date.now() + '-' + fileName);
     fs.writeFileSync(filePath, Buffer.from(data, 'base64'));
 
+    // An image can't be text-extracted — it goes to the model as a vision
+    // attachment instead, with the file left on disk and only referenced by
+    // path (see ImageAttachment) so messages.jsonl stays small.
+    const mediaType = IMAGE_MEDIA_TYPES[path.extname(fileName).toLowerCase()];
+    if (mediaType) {
+      const sizeBytes = Buffer.byteLength(data, 'base64');
+      if (sizeBytes > MAX_IMAGE_BYTES) {
+        this.chat('error',
+          `Image '${fileName}' is ${(sizeBytes / 1024 / 1024).toFixed(1)}MB — the limit is ` +
+          `${MAX_IMAGE_BYTES / 1024 / 1024}MB. Resize or screenshot a smaller region and try again.`);
+        return;
+      }
+      await this.runOrchestrator(
+        userPrompt || 'Look at the attached image and help me with it.',
+        [{ mediaType, name: fileName, path: filePath }]
+      );
+      return;
+    }
+
     // Extract text
     this.chat('system', '📄 Extracting text from ' + fileName + '...');
     let fileContent: string;
@@ -553,6 +670,32 @@ export class ChatPanel {
     this.say('agentState', { state: 'paused' });
     return new Promise((resolve) => {
       this.pendingApproval = { resolve };
+    });
+  }
+
+  /** Loads each attached image's base64 off disk for the provider-bound copy of
+   *  the history. Messages persist only a `path` (see ImageAttachment), so this
+   *  is the one place the bytes enter memory — and only for the request being
+   *  built, never for anything written back to messages.jsonl. An attachment
+   *  whose file has since been deleted is dropped with a note in its place,
+   *  which is far better than failing the whole run over a stale upload. */
+  private hydrateImages(messages: Message[]): Message[] {
+    return messages.map(m => {
+      if (!m.images?.length) return m;
+      const missing: string[] = [];
+      const images: ImageAttachment[] = [];
+      for (const img of m.images) {
+        if (img.data) { images.push(img); continue; }
+        try {
+          images.push({ ...img, data: fs.readFileSync(img.path!).toString('base64') });
+        } catch {
+          missing.push(img.name || path.basename(img.path || 'image'));
+        }
+      }
+      const note = missing.length
+        ? `\n\n_(attached image${missing.length > 1 ? 's' : ''} no longer available: ${missing.join(', ')})_`
+        : '';
+      return { ...m, images, content: m.content + note };
     });
   }
 
@@ -627,7 +770,7 @@ export class ChatPanel {
     return toolCalls;
   }
 
-  private async runOrchestrator(userMessage: string): Promise<void> {
+  private async runOrchestrator(userMessage: string, images?: ImageAttachment[]): Promise<void> {
     this.aborted = false;
     this.abortController = new AbortController();
     this.isRunningAgent = true;
@@ -635,7 +778,12 @@ export class ChatPanel {
     const session = this.sessionManager.activeSession || this.sessionManager.createSession('Chat');
     const isFirstMessage = session.messageCount === 0;
     const promptId = this.sessionManager.generateRunId();
-    this.sessionManager.appendMessage(session.id, { role: 'user', content: userMessage, promptId });
+    this.sessionManager.appendMessage(session.id, {
+      role: 'user',
+      content: userMessage,
+      promptId,
+      ...(images?.length ? { images } : {})
+    });
     // The user's bubble is already rendered locally by the webview before this
     // runs — tag it with promptId now so a later "revert changes from this
     // prompt" affordance (added once we know whether any run produced a
@@ -843,6 +991,12 @@ export class ChatPanel {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
     const loopState = { malformedCount: 0, streamErrorCount: 0 };
 
+    // Auto-load the skills this request obviously calls for, once per run. Doing
+    // it here rather than per-step keeps the system prompt byte-identical across
+    // the run's steps, so the prompt cache still hits — and it saves the
+    // round-trip the model would otherwise spend calling use_skill itself.
+    this.activeSkillContext = this.buildAutoSkillContext(userMessage);
+
     while (!done) {
       if (this.aborted) {
         this.chat('system', '⏹️ Execution cancelled by user.');
@@ -965,17 +1119,23 @@ export class ChatPanel {
       }
     }
 
-    const messages = [
-      { role: 'system', content: buildSystemPrompt(agent) + ragContext + schemaContext + skillsCatalog },
+    const messages = this.hydrateImages([
+      {
+        role: 'system',
+        content: buildSystemPrompt(agent) + ragContext + schemaContext + skillsCatalog + this.activeSkillContext
+      },
       ...baseHistory,
       ...localHistory
-    ];
+    ]);
 
     this.say('agentState', { state: 'running', phase: stepLabel === '1' ? 'Analyzing request...' : 'Continuing reasoning...' });
 
     let fullContent = '';
+    let fullReasoning = '';
     try {
-      fullContent = await this.stream(messages);
+      const streamed = await this.stream(messages);
+      fullContent = streamed.content;
+      fullReasoning = streamed.reasoning;
     } catch (e: any) {
       loopState.streamErrorCount++;
       if (loopState.streamErrorCount > MAX_CONSECUTIVE_STREAM_ERRORS) {
@@ -988,11 +1148,30 @@ export class ChatPanel {
     }
     loopState.streamErrorCount = 0;
 
-    if (fullContent.trim()) {
-      localHistory.push({ role: 'assistant', content: fullContent });
+    // Tool calls normally arrive in the visible reply, but with extended
+    // thinking enabled the model sometimes emits the entire <tool_call> block
+    // inside its thinking stream instead. That text never reached the parser
+    // (stream() used to discard reasoning), so the step parsed as zero calls,
+    // the run ended as "done" mid-task, and the user had to type "continue" to
+    // get an already-decided tool call to actually run. Recover it here.
+    let toolCalls = this.parseToolCalls(fullContent);
+    let transcriptText = fullContent;
+    if (toolCalls.length === 0 && fullReasoning.trim()) {
+      const recovered = this.parseToolCalls(fullReasoning);
+      if (recovered.length > 0) {
+        toolCalls = recovered;
+        // Fold the recovered calls into the assistant turn so the transcript
+        // still shows the call that the tool results below it answer to.
+        transcriptText = [fullContent.trim(), ...recovered.map(c => c.raw)]
+          .filter(Boolean)
+          .join('\n\n');
+      }
     }
 
-    const toolCalls = this.parseToolCalls(fullContent);
+    if (transcriptText.trim()) {
+      localHistory.push({ role: 'assistant', content: transcriptText });
+    }
+
     if (toolCalls.length === 0) {
       // A response can get cut off by the provider's output-length limit mid
       // tool-call (e.g. while streaming a large write_file's <content>). The
@@ -1001,8 +1180,10 @@ export class ChatPanel {
       // and silently dropped the in-progress work, requiring the user to type
       // "continue" to resume. Detect the dangling opening tag and loop again
       // instead of ending the run.
-      const openCount = (fullContent.match(/<tool_call\s+name="/g) || []).length;
-      const closeCount = (fullContent.match(/<\/tool_call>/g) || []).length;
+      // Checked across reply + thinking, since a call can be cut off in either.
+      const emitted = `${fullContent}\n${fullReasoning}`;
+      const openCount = (emitted.match(/<tool_call\s+name="/g) || []).length;
+      const closeCount = (emitted.match(/<\/tool_call>/g) || []).length;
       if (openCount > closeCount) {
         localHistory.push({
           role: 'user',
@@ -1011,21 +1192,30 @@ export class ChatPanel {
         return { done: false, assistantText: fullContent, stopLoop: false };
       }
 
-      // A weaker/free model can drift into its own native function-calling
-      // syntax (e.g. "<invoke name=...><parameter name=...>") instead of the
-      // "<tool_call name=...>" format this app's tool loop actually parses,
-      // sometimes with raw undecoded special tokens (seen in practice as a
-      // literal "DSML" placeholder, or stray "|"/"｜" pipe characters)
-      // spliced into the tag scaffolding — e.g.
-      // "< | DSML | parameter name=\"path\">/</ | DSML | parameter>". None
-      // of that matches parseToolCalls, so without this check it was
-      // accepted as a genuine finished answer and shown to the user
-      // verbatim. Match loosely (words allowed to trail a "<"/"</" by a few
-      // stray characters, not just immediately) and correct the model
-      // instead of ending the run on garbage.
+      // A model can drift into some other tool-invocation syntax instead of the
+      // "<tool_call name=...>" format this app's tool loop actually parses:
+      //   - its own native function-calling syntax ("<invoke name=...>
+      //     <parameter name=...>"), sometimes with raw undecoded special tokens
+      //     (seen in practice as a literal "DSML" placeholder, or stray "|"/"｜"
+      //     pipes) spliced into the tag scaffolding — e.g.
+      //     "< | DSML | parameter name=\"path\">/</ | DSML | parameter>";
+      //   - an invented tag name ("<tool_check><command>ls</command>
+      //     </tool_check>") or a "<tool_call>" with the name attribute dropped.
+      // None of that matches parseToolCalls, so without this check it was
+      // accepted as a genuine finished answer, ending the run mid-task and
+      // making the user type "continue". Match loosely (words allowed to trail
+      // a "<"/"</" by a few stray characters, not just immediately) and correct
+      // the model instead. Scanned across reply *and* thinking, since the model
+      // often makes this mistake inside a thinking block.
       const looksLikeMalformedToolCall =
-        /<\s*\/?[^a-zA-Z\n]{0,6}(invoke|parameter)\b/i.test(fullContent) ||
-        /\bDSML\b/i.test(fullContent);
+        /<\s*\/?[^a-zA-Z\n]{0,6}(invoke|parameter)\b/i.test(emitted) ||
+        /\bDSML\b/i.test(emitted) ||
+        // Opening tag only — a bare "</tool_call>" is handled by the truncation
+        // check above. The lookahead exempts *only* the exact well-formed
+        // "<tool_call name=...>"; a near-miss like "<tool_use name=...>" still
+        // gets flagged, since a plausible-looking name attribute doesn't make
+        // an invented tag executable.
+        /<\s*(?!tool_call\s+name\s*=)(tool[_-]?\w*|function[_-]?call)\b/i.test(emitted);
       if (looksLikeMalformedToolCall) {
         loopState.malformedCount++;
         if (loopState.malformedCount > MAX_CONSECUTIVE_MALFORMED_TOOL_CALLS) {
@@ -1041,7 +1231,7 @@ export class ChatPanel {
         }
         localHistory.push({
           role: 'user',
-          content: 'Your previous response used an invalid tool-call format (garbled or wrong syntax) and was not executed. You must use exactly this format, with no other function-calling syntax, tokens, or extra characters: <tool_call name="TOOL_NAME"><param_name>value</param_name></tool_call>. Retry the tool call now in that exact format.'
+          content: 'Your previous response used an invalid tool-call format (garbled tag, invented tag name such as <tool_check>, or a missing name attribute) and was NOT executed. You must use exactly this format, with no other function-calling syntax, tokens, or extra characters: <tool_call name="TOOL_NAME"><param_name>value</param_name></tool_call> — the literal tag is `tool_call` and the `name` attribute is required. Write it in your visible reply, not inside your reasoning. Retry the tool call now in that exact format.'
         });
         return { done: false, assistantText: fullContent, stopLoop: false };
       }
@@ -1083,7 +1273,7 @@ export class ChatPanel {
         this.say('toolFinished', { tool: tool.name, success: false, output: resultOutput });
       } else {
         let approved = true;
-        const isHighRisk = agent.highRiskTools.includes(tool.name as ToolName);
+        const isHighRisk = agent.highRiskTools.includes(tool.name as ToolName) && !isAutoApprove();
         if (isHighRisk) {
           let diffPayload: { fileExisted?: boolean; diffHunks?: any[] } = {};
           if (tool.name === 'write_file' && tool.args.path) {
@@ -1148,6 +1338,16 @@ export class ChatPanel {
 
           const result = await this.toolExecutor.runTool(tool.name, tool.args, agent.allowedTools);
           resultOutput = result.output;
+
+          if (result.success && tool.name === 'use_skill' && tool.args.id) {
+            const meta = this.skillsStore?.listSkills().find(s => s.id === tool.args.id);
+            this.say('skillEvent', {
+              kind: 'loaded',
+              id: tool.args.id,
+              name: meta?.name || tool.args.id,
+              auto: false
+            });
+          }
 
           // Compile validation & touched-file tracking (for the end-of-run verification phase)
           let validationOutput = '';
@@ -1246,12 +1446,15 @@ export class ChatPanel {
       return { outcome: { ran: false, passed: true, roundsUsed: 0, missingTestNotes: plan.missingTestNotes }, lastAssistantText };
     }
 
-    this.say('verifyApprovalRequired', {
-      runId,
-      willMigrate: plan.shouldMigrate,
-      testCommands: plan.testCommands.map(t => t.description)
-    });
-    const approved = await this.waitForApproval('verify_run', { runId });
+    let approved = true;
+    if (!isAutoApprove()) {
+      this.say('verifyApprovalRequired', {
+        runId,
+        willMigrate: plan.shouldMigrate,
+        testCommands: plan.testCommands.map(t => t.description)
+      });
+      approved = await this.waitForApproval('verify_run', { runId });
+    }
     if (!approved) {
       return { outcome: { ran: false, passed: true, roundsUsed: 0, missingTestNotes: plan.missingTestNotes, skippedReason: 'declined by user' }, lastAssistantText };
     }
@@ -1317,7 +1520,11 @@ export class ChatPanel {
     return { outcome, lastAssistantText };
   }
 
-  private async stream(msgs: { role: string; content: string }[]): Promise<string> {
+  /** Returns the visible reply *and* the thinking stream. Callers need both:
+   *  with extended thinking on, the model sometimes emits a whole <tool_call>
+   *  block inside its thinking instead of the reply, and that call still has
+   *  to be found and executed (see runOneAgentStep). */
+  private async stream(msgs: { role: string; content: string }[]): Promise<{ content: string; reasoning: string }> {
     var full = '', fullReasoning = '', id = '' + Date.now();
     this.panel?.webview.postMessage({ type: 'startStream', messageId: id });
     try {
@@ -1343,7 +1550,7 @@ export class ChatPanel {
       }
     } catch (e) { this.panel?.webview.postMessage({ type: 'streamError', messageId: id, error: String(e) }); throw e; }
     this.panel?.webview.postMessage({ type: 'endStream', messageId: id, fullContent: full, fullReasoning: fullReasoning });
-    return full;
+    return { content: full, reasoning: fullReasoning };
   }
 
   dispose(): void {

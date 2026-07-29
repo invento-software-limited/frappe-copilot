@@ -108,6 +108,19 @@
           ],
           "description": "LLM provider to use for chat and code generation"
         },
+        "frappe-copilot.approvalMode": {
+          "type": "string",
+          "default": "ask",
+          "enum": [
+            "ask",
+            "auto"
+          ],
+          "enumDescriptions": [
+            "Ask before every high-risk action (writing/editing files, running commands, accessing paths outside the workspace, running verification)",
+            "Run everything automatically with no approval prompts. The agent can overwrite files and execute shell/bench commands without confirmation — only use this in a workspace whose changes you can revert (e.g. a clean git tree)"
+          ],
+          "description": "Whether high-risk agent actions require your approval, or run automatically"
+        },
         "frappe-copilot.opencodeZen.endpoint": {
           "type": "string",
           "default": "https://opencode.ai/zen/v1",

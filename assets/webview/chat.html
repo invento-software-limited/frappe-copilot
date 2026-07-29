@@ -15,6 +15,9 @@ body{font-family:var(--vscode-font-family,-apple-system,sans-serif);font-size:va
 .b-off{background:rgba(241,76,76,0.12);color:#f14c4c;border:1px solid rgba(241,76,76,0.22);}
 .b-pending{background:rgba(204,167,0,0.12);color:#cca700;border:1px solid rgba(204,167,0,0.22);}
 .b-agent{background:rgba(97,175,239,0.12);color:#61afef;border:1px solid rgba(97,175,239,0.22);}
+.b-skill{background:rgba(198,134,192,0.12);color:#c686c0;border:1px solid rgba(198,134,192,0.24);}
+.b-skill-new{background:rgba(152,195,121,0.12);color:#98c379;border:1px solid rgba(152,195,121,0.24);}
+.skill-badge-desc{font-size:10px;color:var(--vscode-descriptionForeground,#888);margin-top:3px;line-height:1.35;}
 .b-warn{background:rgba(241,76,76,0.12);color:#f14c4c;border:1px solid rgba(241,76,76,0.22);}
 .agent-badge-msg .bub{padding:2px 0;}
 .run-toggle{display:inline-block;margin-top:4px;font-size:11px;color:var(--vscode-textLink-foreground,#4fc1ff);cursor:pointer;user-select:none;}
@@ -209,6 +212,8 @@ body{font-family:var(--vscode-font-family,-apple-system,sans-serif);font-size:va
 #atc .nm{color:var(--vscode-textLink-foreground,#4fc1ff);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #atc .rm{background:none;border:none;color:var(--vscode-descriptionForeground,#888);cursor:pointer;font-size:14px;padding:2px;}
 #atc .rm:hover{color:var(--vscode-editor-foreground,#d4d4d4);}
+#atc-thumb{height:28px;width:28px;object-fit:cover;border-radius:4px;border:1px solid var(--vscode-widget-border,#333);flex-shrink:0;}
+.msg-image{max-width:100%;max-height:280px;border-radius:6px;border:1px solid var(--vscode-widget-border,#333);margin-top:6px;display:block;cursor:pointer;}
 #skill-atc{display:none;align-items:center;gap:6px;padding:4px 12px;font-size:12px;border-bottom:1px solid var(--vscode-widget-border,#333);flex-shrink:0;background:var(--vscode-editor-background,#1e1e1e);min-height:28px;}
 #skill-atc.on{display:flex;}
 #skill-atc .nm{color:#61afef;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -313,85 +318,154 @@ body{font-family:var(--vscode-font-family,-apple-system,sans-serif);font-size:va
   color: var(--vscode-editor-foreground, #d4d4d4);
 }
 .graph-nodes {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
-  max-height: 250px;
-  overflow-y: auto;
-  padding: 4px 0;
+  position: relative;
+  overflow: auto;
+  max-height: 280px;
+  padding: 8px 4px;
 }
-.node-card {
+.graph-canvas {
+  position: relative;
+}
+.graph-edges-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+.graph-edge-path {
+  stroke: var(--vscode-descriptionForeground,#888);
+  stroke-width: 1.5;
+  opacity: 0.6;
+}
+.graph-edge-path.status-running {
+  stroke: var(--vscode-textLink-foreground,#4fc1ff);
+  opacity: 0.9;
+  stroke-dasharray: 5 3;
+  animation: dashFlow 1s linear infinite;
+}
+.graph-edge-path.status-completed {
+  stroke: var(--vscode-testing-iconPassed,#4ec9b0);
+  opacity: 0.9;
+}
+.graph-edge-path.status-failed {
+  stroke: var(--vscode-testing-iconFailed,#f14c4c);
+  opacity: 0.9;
+}
+.graph-edge-path.status-static {
+  stroke: var(--vscode-charts-purple,#c586c0);
+  opacity: 0.7;
+}
+.graph-edge-label {
+  font-size: 9px;
+  fill: var(--vscode-descriptionForeground,#888);
+}
+@keyframes dashFlow {
+  to { stroke-dashoffset: -16; }
+}
+.graph-node {
   border: 1px solid var(--vscode-widget-border,#404040);
-  background: rgba(0,0,0,0.15);
-  border-radius: 6px;
-  padding: 8px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
   font-size: 11px;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 4px;
-  position: relative;
+  box-sizing: border-box;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.18);
   transition: all 0.2s ease;
 }
-.node-card.running {
-  border-color: var(--vscode-textLink-foreground,#4fc1ff);
-  box-shadow: 0 0 6px rgba(79, 193, 255, 0.2);
+.graph-node.shape-stadium { border-radius: 999px; text-align: center; }
+.graph-node.shape-circle { border-radius: 999px; text-align: center; aspect-ratio: 1; }
+.graph-node.shape-diamond {
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  text-align: center;
+  padding: 18px 26px;
 }
-.node-card.completed {
+.graph-node.status-running {
+  border-color: var(--vscode-textLink-foreground,#4fc1ff);
+  box-shadow: 0 0 8px rgba(79, 193, 255, 0.35);
+}
+.graph-node.status-completed {
   border-color: var(--vscode-testing-iconPassed,#4ec9b0);
 }
-.node-card.failed {
+.graph-node.status-failed {
   border-color: var(--vscode-testing-iconFailed,#f14c4c);
 }
-.node-lbl {
+.graph-node.status-static {
+  border-color: var(--vscode-charts-purple,#c586c0);
+}
+.graph-node-lbl {
   font-weight: 600;
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
-.node-desc {
+.graph-node-desc {
   color: var(--vscode-descriptionForeground,#888);
   font-size: 10px;
   line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
-.node-progress-bar {
+.graph-node-progress-bar {
   background: rgba(255,255,255,0.08);
   height: 4px;
   border-radius: 2px;
   overflow: hidden;
-  margin-top: 4px;
+  margin-top: 2px;
 }
-.node-progress-fill {
+.graph-node-progress-fill {
   background: var(--vscode-textLink-foreground,#4fc1ff);
   height: 100%;
   width: 0%;
   transition: width 0.3s ease;
 }
-.node-card.completed .node-progress-fill {
+.graph-node.status-completed .graph-node-progress-fill {
   background: var(--vscode-testing-iconPassed,#4ec9b0);
 }
-.node-status-indicator {
+.graph-node-status-dot {
   position: absolute;
   top: 8px;
-  right: 8px;
+  right: 10px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--vscode-descriptionForeground,#888);
 }
-.node-card.running .node-status-indicator {
+.graph-node.status-running .graph-node-status-dot {
   background: var(--vscode-textLink-foreground,#4fc1ff);
   animation: pulse 1.5s infinite;
 }
-.node-card.completed .node-status-indicator {
+.graph-node.status-completed .graph-node-status-dot {
   background: var(--vscode-testing-iconPassed,#4ec9b0);
 }
-.node-card.failed .node-status-indicator {
+.graph-node.status-failed .graph-node-status-dot {
   background: var(--vscode-testing-iconFailed,#f14c4c);
+}
+.graph-node.status-static .graph-node-status-dot {
+  display: none;
 }
 @keyframes pulse {
   0% { transform: scale(0.9); opacity: 0.6; }
   50% { transform: scale(1.2); opacity: 1; }
   100% { transform: scale(0.9); opacity: 0.6; }
+}
+.custom-graph-container {
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
+}
+.custom-graph-container:hover {
+  border-color: var(--vscode-textLink-foreground, #3794ff) !important;
+  box-shadow: 0 0 8px rgba(55, 148, 255, 0.15);
 }
 
 /* Thinking Indicator */
@@ -708,6 +782,10 @@ window.onerror = function(message, source, lineno, colno, error) {
   <span class="badge b-pending" id="st">init</span>
   <span class="badge b-on" id="token-badge" style="display:none;" title="">~0 tok</span>
   <span class="sep"></span>
+  <select id="mode-select" class="hdr-select" title="Approval mode">
+    <option value="ask">🛡️ Ask</option>
+    <option value="auto">⚡ Auto</option>
+  </select>
   <select id="model-select" class="hdr-select" title="Select Model" style="display:none;"></select>
   <button class="hdr-btn" id="btn-new-chat" title="New Session">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z"/></svg>
@@ -842,10 +920,10 @@ window.onerror = function(message, source, lineno, colno, error) {
     </div>
   </div>
 </div>
-<div id="atc"><span class="nm" id="fn"></span><button class="rm" id="rma">✕</button></div>
+<div id="atc"><img id="atc-thumb" alt="" style="display:none;"><span class="nm" id="fn"></span><button class="rm" id="rma">✕</button></div>
 <div id="skill-atc"><span class="nm" id="skill-atc-name"></span><button class="rm" id="skill-atc-rm">✕</button></div>
 <div id="bot">
-  <input type="file" id="fi" accept=".pdf,.html,.htm">
+  <input type="file" id="fi" accept=".pdf,.html,.htm,.png,.jpg,.jpeg,.gif,.webp">
   <button class="btn" id="upb" title="Attach file">
     <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M11.5 3.5a3 3 0 0 0-4.24 0L3.05 7.71a2.12 2.12 0 1 0 3 3l4.21-4.21a1.2 1.2 0 1 0-1.7-1.7L4.76 8.59l-.7-.7 3.79-3.79a2.2 2.2 0 1 1 3.11 3.11l-4.21 4.21a3.12 3.12 0 0 1-4.41-4.41L8.5 2.8a4 4 0 1 1 5.66 5.66l-5.3 5.3-.7-.7 5.3-5.3a3 3 0 0 0-1.96-4.26z"/></svg>
   </button>
@@ -1059,6 +1137,24 @@ window.onerror = function(message, source, lineno, colno, error) {
     appendToChat(d);
   }
 
+  /** Skill lifecycle badge: auto-selected for the request, explicitly loaded by
+   *  the model via use_skill, or newly added to the library. */
+  function showSkillEvent(m) {
+    var created = m.kind === 'created';
+    var label = created
+      ? '✨ Skill created: ' + esc(m.name)
+      : '📚 Skill loaded' + (m.auto ? ' (auto)' : '') + ': ' + esc(m.name);
+
+    var d = document.createElement('div');
+    d.className = 'msg system-msg skill-badge-msg';
+    d.innerHTML = '<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
+      '<span class="badge ' + (created ? 'b-skill-new' : 'b-skill') + '">' + label + '</span>' +
+      (created && m.description ? '<div class="skill-badge-desc">' + esc(m.description) + '</div>' : '') +
+      '</div>';
+    appendToChat(d);
+    stickScroll();
+  }
+
   function showVerifyApproval(m) {
     var d=document.createElement('div');
     d.className='msg system-msg verify-approval-msg';
@@ -1211,6 +1307,7 @@ window.onerror = function(message, source, lineno, colno, error) {
     d.innerHTML='<div class="ln"></div><div class="dot '+dn+'"></div><div class="bub">'+contentHtml+runToggleHtml+'</div>';
     appendToChat(d);
     renderMermaid();
+    flushCustomGraphs();
 
     // Tagged on every user bubble (even with no known promptId yet) so a
     // later "userPromptStarted" event — sent once the backend has actually
@@ -1289,6 +1386,7 @@ window.onerror = function(message, source, lineno, colno, error) {
       '</div></div>';
     appendToChat(d);
     renderMermaid();
+    flushCustomGraphs();
 
     var btns = d.querySelector('#revert-preview-btns');
     d.querySelector('#revert-preview-yes').onclick = function() {
@@ -1477,17 +1575,78 @@ window.onerror = function(message, source, lineno, colno, error) {
   }
 
   // attach file
+  var IMAGE_EXTS = ['png','jpg','jpeg','gif','webp'];
+  var MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  var thumbEl = document.getElementById('atc-thumb');
+  var attachedIsImage = false;
+
+  function isImageName(name) {
+    return IMAGE_EXTS.indexOf(String(name).split('.').pop().toLowerCase()) !== -1;
+  }
+
+  function clearAttachment() {
+    attachedFile = null;
+    attachedIsImage = false;
+    atc.classList.remove('on');
+    thumbEl.style.display = 'none';
+    thumbEl.removeAttribute('src');
+    updBtn();
+  }
+
+  /** Shared by the file picker and clipboard paste. Returns false if rejected. */
+  function attachFile(f) {
+    var isImage = isImageName(f.name) || (f.type && f.type.indexOf('image/') === 0);
+    if (!isImage) {
+      var ext = f.name.split('.').pop().toLowerCase();
+      if (ext !== 'pdf' && ext !== 'html' && ext !== 'htm') {
+        addMsg('error', 'Unsupported file type. Use PDF, HTML, or an image (PNG, JPG, GIF, WebP).');
+        return false;
+      }
+    }
+    if (isImage && f.size > MAX_IMAGE_BYTES) {
+      addMsg('error', 'Image is ' + (f.size / 1024 / 1024).toFixed(1) + 'MB — the limit is 5MB. Resize it and try again.');
+      return false;
+    }
+
+    attachedFile = f;
+    attachedIsImage = isImage;
+    fnEl.textContent = (isImage ? '🖼️ ' : '📎 ') + f.name + ' (' + (f.size / 1024).toFixed(0) + 'KB)';
+    atc.classList.add('on');
+    if (isImage) {
+      var pr = new FileReader();
+      pr.onload = function(ev) { thumbEl.src = ev.target.result; thumbEl.style.display = 'block'; };
+      pr.readAsDataURL(f);
+    } else {
+      thumbEl.style.display = 'none';
+      thumbEl.removeAttribute('src');
+    }
+    updBtn();
+    return true;
+  }
+
   ub.addEventListener('click',function(){fi.click();});
   fi.addEventListener('change',function(){
-    if(fi.files&&fi.files[0]){
-      var f=fi.files[0];
-      var ext=f.name.split('.').pop().toLowerCase();
-      if(ext!=='pdf'&&ext!=='html'&&ext!=='htm'){addMsg('error','Unsupported file type. Use PDF or HTML.');fi.value='';return;}
-      attachedFile=f;fnEl.textContent='📎 '+f.name+' ('+(f.size/1024).toFixed(0)+'KB)';atc.classList.add('on');updBtn();
-    }
+    if(fi.files&&fi.files[0]) attachFile(fi.files[0]);
     fi.value='';
   });
-  rmEl.addEventListener('click',function(){attachedFile=null;atc.classList.remove('on');updBtn();});
+  rmEl.addEventListener('click', clearAttachment);
+
+  // Paste a screenshot straight into the composer — the common case for
+  // "here's what my screen looks like", where saving to a file first is pure friction.
+  ip.addEventListener('paste', function(e) {
+    var items = (e.clipboardData || {}).items || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind !== 'file' || items[i].type.indexOf('image/') !== 0) continue;
+      var blob = items[i].getAsFile();
+      if (!blob) continue;
+      e.preventDefault();
+      var ext = (items[i].type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      // Clipboard images arrive unnamed; synthesize one so the extension host
+      // can key off the extension for its media type.
+      attachFile(new File([blob], 'pasted-' + Date.now() + '.' + ext, { type: items[i].type }));
+      return;
+    }
+  });
 
   // send message + optionally file
   function send(){
@@ -1528,8 +1687,23 @@ window.onerror = function(message, source, lineno, colno, error) {
     if(attachedFile){
       var f=attachedFile;
       var nm=fnEl.textContent;
-      attachedFile=null;atc.classList.remove('on');
+      var wasImage=attachedIsImage;
+      var thumbSrc=wasImage?thumbEl.getAttribute('src'):null;
+      clearAttachment();
       addMsg('user',nm+(text?':\n'+text:''));
+      // Echo the image back in the user's own bubble, so the conversation still
+      // reads correctly on scroll-back instead of just naming a file.
+      if(wasImage&&thumbSrc){
+        var bubbles=ch.querySelectorAll('.msg.user-msg .bub');
+        var lastBub=bubbles[bubbles.length-1];
+        if(lastBub){
+          var im=document.createElement('img');
+          im.className='msg-image';
+          im.src=thumbSrc;
+          lastBub.appendChild(im);
+          im.onload = stickScroll;
+        }
+      }
       var r=new FileReader();
       r.onload=function(ev){vs.postMessage({type:'sendWithFile',text:llmText,fileName:f.name,fileType:f.name.split('.').pop().toLowerCase(),fileSize:f.size,data:ev.target.result.split(',')[1]});};
       r.readAsDataURL(f);
@@ -1668,17 +1842,36 @@ window.onerror = function(message, source, lineno, colno, error) {
     vs.postMessage({ type: 'selectModel', model: modelSelect.value });
   };
 
+  var modeSelect = document.getElementById('mode-select');
+  function paintModeSelect() {
+    var auto = modeSelect.value === 'auto';
+    modeSelect.style.color = auto ? '#e5c07b' : '';
+    modeSelect.style.borderColor = auto ? 'rgba(229,192,123,0.45)' : '';
+    modeSelect.title = auto
+      ? 'Auto — runs file writes, edits, commands and verification with no approval prompts'
+      : 'Ask — pauses for approval before high-risk actions';
+  }
+  modeSelect.onchange = function() {
+    paintModeSelect();
+    vs.postMessage({ type: 'setApprovalMode', mode: modeSelect.value });
+  };
+
   var mermaidModal = document.getElementById('mermaid-modal');
   var mermaidModalBody = document.getElementById('mermaid-modal-body');
 
   function openMermaidModal(svgHtml) {
     mermaidModalBody.innerHTML = svgHtml;
-    var svg = mermaidModalBody.querySelector('svg');
-    if (svg) {
-      svg.style.maxWidth = '100%';
-      svg.style.maxHeight = '100%';
-      svg.style.width = 'auto';
-      svg.style.height = 'auto';
+    // Only mermaid.js's own root <svg> can be freely rescaled to fit the modal —
+    // our custom .graph-canvas mixes an SVG edge layer with absolutely-positioned
+    // node divs at fixed pixel coordinates, so resizing just the svg would pull
+    // the edges out of alignment with the node cards. Leave it at natural size
+    // and let the modal body's own overflow:auto handle scrolling instead.
+    var root = mermaidModalBody.firstElementChild;
+    if (root && root.tagName === 'svg') {
+      root.style.maxWidth = '100%';
+      root.style.maxHeight = '100%';
+      root.style.width = 'auto';
+      root.style.height = 'auto';
     }
     mermaidModal.style.display = 'flex';
   }
@@ -1691,19 +1884,113 @@ window.onerror = function(message, source, lineno, colno, error) {
       mermaidModal.style.display = 'none';
     }
   };
+  /** An exported file carries none of this page's CSS, so any `var(--x, #fff)`
+   *  left in an attribute would render as nothing — collapse each to its literal
+   *  fallback. */
+  function resolveCssVars(s) {
+    return s.replace(/var\(\s*--[^,)]+,\s*([^)]+)\)/g, '$1');
+  }
+
+  function escXml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /** Flattens a custom .graph-canvas into one standalone SVG. The canvas is a
+   *  hybrid — an SVG edge layer plus absolutely-positioned HTML node divs — so
+   *  serializing its <svg> alone would export arrows with no boxes. Node divs
+   *  are re-emitted as <rect>+<text>, and every colour is read back through
+   *  getComputedStyle so theme variables become literals. */
+  function canvasToStandaloneSVG(canvas) {
+    var w = Math.ceil(parseFloat(canvas.style.width) || canvas.scrollWidth);
+    var h = Math.ceil(parseFloat(canvas.style.height) || canvas.scrollHeight);
+    var out = ['<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">'];
+    out.push('<rect width="' + w + '" height="' + h + '" fill="#1e1e1e"/>');
+
+    var src = canvas.querySelector('svg');
+    if (src) {
+      var clone = src.cloneNode(true);
+      var from = src.querySelectorAll('path, line, text');
+      var to = clone.querySelectorAll('path, line, text');
+      for (var i = 0; i < from.length; i++) {
+        var cs = getComputedStyle(from[i]);
+        var el = to[i];
+        if (el.tagName.toLowerCase() === 'text') {
+          el.setAttribute('fill', cs.fill);
+          el.setAttribute('font-size', cs.fontSize);
+          el.setAttribute('font-family', 'sans-serif');
+        } else {
+          el.setAttribute('stroke', cs.stroke);
+          el.setAttribute('stroke-width', cs.strokeWidth);
+          el.setAttribute('opacity', cs.opacity);
+          if (cs.strokeDasharray && cs.strokeDasharray !== 'none') {
+            el.setAttribute('stroke-dasharray', cs.strokeDasharray);
+          }
+          if (!el.getAttribute('fill')) el.setAttribute('fill', 'none');
+        }
+        el.removeAttribute('class');
+      }
+      out.push(clone.innerHTML);
+    }
+
+    var nodes = canvas.querySelectorAll('.graph-node');
+    for (var n = 0; n < nodes.length; n++) {
+      var node = nodes[n];
+      var ns = getComputedStyle(node);
+      var x = parseFloat(node.style.left) || 0;
+      var y = parseFloat(node.style.top) || 0;
+      var nw = parseFloat(node.style.width) || 0;
+      var nh = parseFloat(node.style.height) || 0;
+      var round = (node.classList.contains('shape-stadium') || node.classList.contains('shape-circle')) ? nh / 2 : 8;
+
+      out.push('<rect x="' + x + '" y="' + y + '" width="' + nw + '" height="' + nh + '" rx="' + round +
+        '" ry="' + round + '" fill="' + ns.backgroundColor + '" stroke="' + ns.borderTopColor + '" stroke-width="1"/>');
+
+      var lbl = node.querySelector('.graph-node-lbl');
+      var desc = node.querySelector('.graph-node-desc');
+      var descText = desc ? desc.textContent.trim() : '';
+      var cx = x + nw / 2;
+      var baseY = descText ? y + nh / 2 - 1 : y + nh / 2 + 4;
+      if (lbl) {
+        out.push('<text x="' + cx + '" y="' + baseY + '" text-anchor="middle" font-size="11" font-weight="600" ' +
+          'font-family="sans-serif" fill="' + getComputedStyle(lbl).color + '">' + escXml(lbl.textContent.trim()) + '</text>');
+      }
+      if (descText) {
+        out.push('<text x="' + cx + '" y="' + (baseY + 13) + '" text-anchor="middle" font-size="9" ' +
+          'font-family="sans-serif" fill="' + getComputedStyle(desc).color + '">' + escXml(descText.slice(0, 42)) + '</text>');
+      }
+    }
+
+    out.push('</svg>');
+    return resolveCssVars(out.join('\n'));
+  }
+
   document.getElementById('btn-download-svg').onclick = function() {
+    // Order matters: a custom canvas also contains an <svg> (its edge layer),
+    // and serializing that alone would lose every node.
+    var canvas = mermaidModalBody.querySelector('.graph-canvas');
+    if (canvas) {
+      vs.postMessage({ type: 'saveFile', defaultName: 'diagram.svg', data: canvasToStandaloneSVG(canvas) });
+      return;
+    }
+
     var svg = mermaidModalBody.querySelector('svg');
     if (svg) {
-      var svgContent = svg.outerHTML;
-      var blob = new Blob([svgContent], { type: 'image/svg+xml;charset=utf-8' });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = 'flowchart.svg';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      var clone = svg.cloneNode(true);
+      clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+      vs.postMessage({ type: 'saveFile', defaultName: 'diagram.svg', data: resolveCssVars(clone.outerHTML) });
+      return;
+    }
+
+    var img = mermaidModalBody.querySelector('img');
+    var match = img && (img.getAttribute('src') || '').match(/^data:([^;]+);base64,(.+)$/);
+    if (match) {
+      vs.postMessage({
+        type: 'saveFile',
+        defaultName: 'image.' + ((match[1].split('/')[1] || 'png').replace('svg+xml', 'svg')),
+        data: match[2],
+        encoding: 'base64'
+      });
     }
   };
 
@@ -1723,6 +2010,21 @@ window.onerror = function(message, source, lineno, colno, error) {
       if (svg) {
         openMermaidModal(svg.outerHTML);
       }
+      return;
+    }
+
+    var customGraph = e.target.closest('.custom-graph-container');
+    if (customGraph) {
+      var canvas = customGraph.querySelector('.graph-canvas');
+      if (canvas) {
+        openMermaidModal(canvas.outerHTML);
+      }
+      return;
+    }
+
+    if (e.target.classList && e.target.classList.contains('msg-image')) {
+      openMermaidModal('<img src="' + esc(e.target.getAttribute('src')) +
+        '" style="max-width:100%; max-height:100%; object-fit:contain;">');
     }
   });
 
@@ -1878,6 +2180,7 @@ window.onerror = function(message, source, lineno, colno, error) {
     seRawText = '';
     seRawThought = '';
     renderMermaid();
+    flushCustomGraphs();
   }
   function sErr(id,e){
     removeThinking();
@@ -1966,10 +2269,22 @@ window.onerror = function(message, source, lineno, colno, error) {
       var escapedCode = esc(c.trim());
       var codeId = 'code-' + Math.random().toString(36).substr(2, 9);
       if (l && l.toLowerCase() === 'mermaid') {
-        var html = 
-          '<div class="mermaid-container" style="background:var(--vscode-textCodeBlock-background,#2d2d2d); padding:10px; border-radius:6px; margin:6px 0; border:1px solid var(--vscode-widget-border,#333); overflow-x:auto; display:flex; justify-content:center;">' +
-            '<pre class="mermaid" style="margin:0; background:none; font-family:inherit; color:inherit;">' + escapedCode + '</pre>' +
-          '</div>';
+        var parsed = null;
+        try { parsed = parseMermaidDiagram(c.trim()); } catch (e) { parsed = null; }
+        var html;
+        if (parsed) {
+          var graphId = 'custom-graph-' + Math.random().toString(36).substr(2, 9);
+          html =
+            '<div class="custom-graph-container" style="background:var(--vscode-textCodeBlock-background,#2d2d2d); padding:10px; border-radius:6px; margin:6px 0; border:1px solid var(--vscode-widget-border,#333); overflow:auto;">' +
+              '<div id="' + graphId + '"></div>' +
+            '</div>';
+          pendingCustomGraphs.push({ id: graphId, parsed: parsed });
+        } else {
+          html =
+            '<div class="mermaid-container" style="background:var(--vscode-textCodeBlock-background,#2d2d2d); padding:10px; border-radius:6px; margin:6px 0; border:1px solid var(--vscode-widget-border,#333); overflow-x:auto; display:flex; justify-content:center;">' +
+              '<pre class="mermaid" style="margin:0; background:none; font-family:inherit; color:inherit;">' + escapedCode + '</pre>' +
+            '</div>';
+        }
         codes.push(html);
         return '@C' + (codes.length - 1) + '@';
       }
@@ -2172,6 +2487,11 @@ window.onerror = function(message, source, lineno, colno, error) {
         break;
       case 'graphUpdated': renderGraph(m.graph); break;
       case 'agentRouted': showAgentBadge(m); break;
+      case 'skillEvent': showSkillEvent(m); break;
+      case 'approvalMode':
+        modeSelect.value = m.mode === 'auto' ? 'auto' : 'ask';
+        paintModeSelect();
+        break;
       case 'runTranscript': renderRunTranscript(m.runId, m.entries); break;
       case 'verifyApprovalRequired': showVerifyApproval(m); break;
       case 'verifyResult': showVerifyResult(m); break;
@@ -2499,6 +2819,148 @@ window.onerror = function(message, source, lineno, colno, error) {
     });
   }
 
+  // --- Shared layered node-graph renderer ---------------------------------
+  // Used both by the live "Workflow Execution Plan" panel (renderGraph, below)
+  // and by the mermaid-fence interceptor in md() further down, so a flowchart
+  // the model writes in chat gets the same colored-node/curved-SVG-edge look
+  // as the agent's own tool-call graph instead of mermaid.js's default theme.
+
+  var NODE_W = 150, NODE_H = 56, GAP_X = 30, GAP_Y = 42;
+
+  /** Assigns each node a layer via longest-path-from-root (Kahn's algorithm),
+   *  then lays out layers as rows (TD) or columns (LR), centering each
+   *  layer's siblings on the cross axis. Disconnected/cyclic nodes just fall
+   *  back to layer 0 rather than blocking layout. */
+  function computeLayeredLayout(nodeIds, edges, direction) {
+    var indeg = {}, adj = {};
+    nodeIds.forEach(function(id) { indeg[id] = 0; adj[id] = []; });
+    edges.forEach(function(e) {
+      if (adj[e.from] && indeg[e.to] !== undefined) {
+        adj[e.from].push(e.to);
+        indeg[e.to]++;
+      }
+    });
+
+    var level = {};
+    var queue = nodeIds.filter(function(id) { return indeg[id] === 0; });
+    queue.forEach(function(id) { level[id] = 0; });
+    var guard = 0, maxGuard = (nodeIds.length + edges.length) * 4 + 10;
+    for (var qi = 0; qi < queue.length && guard < maxGuard; qi++) {
+      guard++;
+      var cur = queue[qi];
+      adj[cur].forEach(function(next) {
+        var lvl = level[cur] + 1;
+        if (level[next] === undefined || lvl > level[next]) level[next] = lvl;
+        if (queue.indexOf(next) === -1) queue.push(next);
+      });
+    }
+    nodeIds.forEach(function(id) { if (level[id] === undefined) level[id] = 0; });
+
+    var layers = {};
+    nodeIds.forEach(function(id) {
+      var l = level[id];
+      if (!layers[l]) layers[l] = [];
+      layers[l].push(id);
+    });
+    var layerKeys = Object.keys(layers).map(Number).sort(function(a, b) { return a - b; });
+
+    var vertical = direction !== 'LR';
+    var mainBox = vertical ? NODE_H : NODE_W;
+    var mainGap = vertical ? GAP_Y : GAP_X;
+    var crossBox = vertical ? NODE_W : NODE_H;
+    var crossGap = vertical ? GAP_X : GAP_Y;
+
+    var maxSiblings = 0;
+    layerKeys.forEach(function(lk) { maxSiblings = Math.max(maxSiblings, layers[lk].length); });
+    var totalCross = maxSiblings * (crossBox + crossGap) - crossGap;
+
+    var positions = {};
+    layerKeys.forEach(function(lk, li) {
+      var ids = layers[lk];
+      var crossSize = ids.length * (crossBox + crossGap) - crossGap;
+      var crossOffset = (totalCross - crossSize) / 2;
+      ids.forEach(function(id, idx) {
+        var cross = crossOffset + idx * (crossBox + crossGap);
+        var main = li * (mainBox + mainGap);
+        positions[id] = vertical
+          ? { x: cross, y: main, w: NODE_W, h: NODE_H }
+          : { x: main, y: cross, w: NODE_W, h: NODE_H };
+      });
+    });
+
+    var width = vertical ? totalCross : layerKeys.length * (mainBox + mainGap) - mainGap;
+    var height = vertical ? layerKeys.length * (mainBox + mainGap) - mainGap : totalCross;
+    return { positions: positions, width: Math.max(width, NODE_W), height: Math.max(height, NODE_H) };
+  }
+
+  /** Renders nodeList/edgeList into container as absolutely-positioned node
+   *  cards over an SVG layer of curved, arrow-headed edges colored by the
+   *  target node's status. opts.direction is 'TD' or 'LR'. */
+  function renderNodeGraphSVG(container, nodeList, edgeList, opts) {
+    opts = opts || {};
+    var direction = opts.direction || 'TD';
+    var getStatus = opts.getStatus || function(n) { return n.status || 'pending'; };
+    var byId = {};
+    nodeList.forEach(function(n) { byId[n.id] = n; });
+    var edges = edgeList.filter(function(e) { return byId[e.from] && byId[e.to]; });
+    var layout = computeLayeredLayout(nodeList.map(function(n) { return n.id; }), edges, direction);
+    var pos = layout.positions;
+    var statuses = ['pending', 'running', 'completed', 'failed', 'static'];
+
+    var svg = '<svg class="graph-edges-svg" width="' + layout.width + '" height="' + layout.height + '" style="overflow:visible;"><defs>' +
+      statuses.map(function(s) {
+        var color = s === 'running' ? 'var(--vscode-textLink-foreground,#4fc1ff)'
+          : s === 'completed' ? 'var(--vscode-testing-iconPassed,#4ec9b0)'
+          : s === 'failed' ? 'var(--vscode-testing-iconFailed,#f14c4c)'
+          : s === 'static' ? 'var(--vscode-charts-purple,#c586c0)'
+          : 'var(--vscode-descriptionForeground,#888)';
+        return '<marker id="arrow-' + s + '" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
+          '<path d="M0,0 L10,5 L0,10 z" fill="' + color + '"/></marker>';
+      }).join('') +
+      '</defs>';
+
+    edges.forEach(function(e) {
+      var a = pos[e.from], b = pos[e.to];
+      if (!a || !b) return;
+      var x1, y1, x2, y2, c1x, c1y, c2x, c2y;
+      if (direction === 'LR') {
+        x1 = a.x + a.w; y1 = a.y + a.h / 2;
+        x2 = b.x; y2 = b.y + b.h / 2;
+        var midX = (x1 + x2) / 2;
+        c1x = midX; c1y = y1; c2x = midX; c2y = y2;
+      } else {
+        x1 = a.x + a.w / 2; y1 = a.y + a.h;
+        x2 = b.x + b.w / 2; y2 = b.y;
+        var midY = (y1 + y2) / 2;
+        c1x = x1; c1y = midY; c2x = x2; c2y = midY;
+      }
+      var targetStatus = getStatus(byId[e.to]);
+      var d = 'M' + x1 + ',' + y1 + ' C' + c1x + ',' + c1y + ' ' + c2x + ',' + c2y + ' ' + x2 + ',' + y2;
+      svg += '<path class="graph-edge-path status-' + targetStatus + '" d="' + d + '" fill="none" marker-end="url(#arrow-' + targetStatus + ')"/>';
+      if (e.label) {
+        svg += '<text class="graph-edge-label" x="' + ((x1 + x2) / 2) + '" y="' + ((y1 + y2) / 2 - 4) + '" text-anchor="middle">' + esc(e.label) + '</text>';
+      }
+    });
+    svg += '</svg>';
+
+    var nodesHtml = nodeList.map(function(n) {
+      var p = pos[n.id];
+      if (!p) return '';
+      var status = getStatus(n);
+      var shape = n.shape || 'rect';
+      var showProgress = opts.showProgress && status !== 'static';
+      var progressVal = n.progress || (status === 'completed' ? 100 : 0);
+      return '<div class="graph-node shape-' + shape + ' status-' + status + '" style="position:absolute; left:' + p.x + 'px; top:' + p.y + 'px; width:' + p.w + 'px; height:' + p.h + 'px;">' +
+        '<div class="graph-node-status-dot"></div>' +
+        '<div class="graph-node-lbl">' + esc(n.label) + '</div>' +
+        (n.description ? '<div class="graph-node-desc">' + esc(n.description) + '</div>' : '') +
+        (showProgress ? '<div class="graph-node-progress-bar"><div class="graph-node-progress-fill" style="width:' + progressVal + '%;"></div></div>' : '') +
+        '</div>';
+    }).join('');
+
+    container.innerHTML = '<div class="graph-canvas" style="width:' + layout.width + 'px; height:' + layout.height + 'px;">' + svg + nodesHtml + '</div>';
+  }
+
   function renderGraph(graph) {
     if (!graph || !graph.nodes || graph.nodes.length === 0) {
       gpPanel.style.display = 'none';
@@ -2506,23 +2968,274 @@ window.onerror = function(message, source, lineno, colno, error) {
     }
     gpPanel.style.display = 'flex';
     gpTitle.textContent = graph.name || 'Task Execution';
-    
-    gpNodes.innerHTML = '';
-    graph.nodes.forEach(function(node) {
-      var card = document.createElement('div');
-      card.className = 'node-card ' + (node.status || 'pending');
-      
-      var progressVal = node.progress || (node.status === 'completed' ? 100 : 0);
-
-      card.innerHTML = 
-        '<div class="node-status-indicator"></div>' +
-        '<div class="node-lbl">' + esc(node.label) + '</div>' +
-        '<div class="node-desc">' + esc(node.description) + '</div>' +
-        '<div class="node-progress-bar">' +
-          '<div class="node-progress-fill" style="width: ' + progressVal + '%;"></div>' +
-        '</div>';
-      gpNodes.appendChild(card);
+    renderNodeGraphSVG(gpNodes, graph.nodes, graph.edges || [], {
+      direction: 'TD',
+      getStatus: function(n) { return n.status || 'pending'; },
+      showProgress: true
     });
+  }
+
+  // --- Mermaid flowchart interceptor --------------------------------------
+  // Best-effort parser for the common `graph`/`flowchart` subset an LLM
+  // actually writes (one edge per line, [rect]/(stadium)/((circle))/{diamond}
+  // shapes, optional |edge label|). Anything it can't confidently parse — a
+  // non-flowchart diagram type (sequence/class/ER/gantt/pie/state), or a line
+  // shape it doesn't recognize — returns null so the caller falls back to
+  // real mermaid.js rather than showing a broken or empty diagram.
+  var SHAPE_ALT = '\\[[^\\]]*\\]|\\(\\([^)]*\\)\\)|\\{[^}]*\\}|\\([^)]*\\)';
+  var EDGE_LINE_RE = new RegExp(
+    '^([A-Za-z0-9_.\\-]+)\\s*(' + SHAPE_ALT + ')?\\s*' +
+    '(-{2,3}>|={2,3}>|-\\.-+>|-{2,3}|={2,3})\\s*' +
+    '(?:\\|([^|]*)\\|\\s*)?' +
+    '([A-Za-z0-9_.\\-]+)\\s*(' + SHAPE_ALT + ')?\\s*$'
+  );
+  var NODE_ONLY_RE = new RegExp('^([A-Za-z0-9_.\\-]+)\\s*(' + SHAPE_ALT + ')\\s*$');
+  var SKIP_LINE_RE = /^(subgraph\b|end$|classDef\s|class\s|click\s|style\s|linkStyle\s)/i;
+
+  function parseMermaidFlowchart(src) {
+    var lines = src.split('\n')
+      .map(function(l) { return l.replace(/%%.*/, '').trim(); })
+      .filter(Boolean);
+    if (!lines.length) return null;
+
+    var head = lines[0].match(/^(graph|flowchart)\s+(td|lr|bt|rl|tb)?/i);
+    if (!head) return null;
+    var direction = /^(lr|rl)$/i.test(head[2] || '') ? 'LR' : 'TD';
+
+    var byId = {}, order = [], edges = [];
+    function ensureNode(id) {
+      if (!byId[id]) { byId[id] = { id: id, label: id, shape: 'rect' }; order.push(id); }
+      return byId[id];
+    }
+    function applyShape(id, token) {
+      var node = ensureNode(id);
+      if (!token) return;
+      var m;
+      if ((m = token.match(/^\(\((.*)\)\)$/))) { node.shape = 'circle'; node.label = m[1].trim(); }
+      else if ((m = token.match(/^\{(.*)\}$/))) { node.shape = 'diamond'; node.label = m[1].trim(); }
+      else if ((m = token.match(/^\((.*)\)$/))) { node.shape = 'stadium'; node.label = m[1].trim(); }
+      else if ((m = token.match(/^\[(.*)\]$/))) { node.shape = 'rect'; node.label = m[1].trim(); }
+    }
+
+    for (var i = 1; i < lines.length; i++) {
+      var line = lines[i];
+      if (SKIP_LINE_RE.test(line)) continue;
+      var m = line.match(EDGE_LINE_RE);
+      if (m) {
+        applyShape(m[1], m[2]);
+        applyShape(m[5], m[6]);
+        edges.push({ from: m[1], to: m[5], label: m[4] ? m[4].trim() : undefined });
+        continue;
+      }
+      var nm = line.match(NODE_ONLY_RE);
+      if (nm) applyShape(nm[1], nm[2]);
+    }
+
+    if (edges.length === 0) return null;
+    return { kind: 'flow', direction: direction, nodes: order.map(function(id) { return byId[id]; }), edges: edges };
+  }
+
+  // erDiagram: relationship lines (`CUSTOMER ||--o{ ORDER : places`) plus
+  // optional attribute blocks (`CUSTOMER { string name }`). Entities become
+  // nodes labelled with their attribute list, so the same layered node/edge
+  // renderer draws them — the common case for Frappe DocType relationships.
+  var ER_REL_RE = /^([A-Za-z0-9_-]+)\s+([|}o{][|}o{.\-]*[|}o{])\s+([A-Za-z0-9_-]+)\s*:\s*(.*)$/;
+
+  function erCardinality(symbol) {
+    function side(s, atStart) {
+      if (/\|\|/.test(s)) return '1';
+      if (/\}\||\|\{/.test(s)) return 'N';
+      if (/\}o|o\{/.test(s)) return '0..N';
+      if (/o\|/.test(s) || /\|o/.test(s)) return '0..1';
+      return '';
+    }
+    var left = symbol.slice(0, 2), right = symbol.slice(-2);
+    var l = side(left, true), r = side(right, false);
+    return l && r ? l + '–' + r : '';
+  }
+
+  function parseMermaidER(src) {
+    var lines = src.split('\n')
+      .map(function(l) { return l.replace(/%%.*/, '').trim(); })
+      .filter(Boolean);
+    if (!lines.length || !/^erDiagram\b/i.test(lines[0])) return null;
+
+    var byId = {}, order = [], edges = [];
+    function ensureNode(id) {
+      if (!byId[id]) { byId[id] = { id: id, label: id, shape: 'rect', attrs: [] }; order.push(id); }
+      return byId[id];
+    }
+
+    var currentEntity = null;
+    for (var i = 1; i < lines.length; i++) {
+      var line = lines[i];
+      if (currentEntity) {
+        if (line === '}') { currentEntity = null; continue; }
+        var parts = line.replace(/"/g, '').split(/\s+/).filter(Boolean);
+        if (parts.length >= 2) currentEntity.attrs.push(parts[1]);
+        else if (parts.length === 1) currentEntity.attrs.push(parts[0]);
+        continue;
+      }
+      var open = line.match(/^([A-Za-z0-9_-]+)\s*\{$/);
+      if (open) { currentEntity = ensureNode(open[1]); continue; }
+
+      var m = line.match(ER_REL_RE);
+      if (m) {
+        ensureNode(m[1]);
+        ensureNode(m[3]);
+        var card = erCardinality(m[2]);
+        var label = (m[4] || '').replace(/"/g, '').trim();
+        edges.push({
+          from: m[1],
+          to: m[3],
+          label: [label, card].filter(Boolean).join(' ')
+        });
+      }
+    }
+
+    if (edges.length === 0) return null;
+    var nodes = order.map(function(id) {
+      var n = byId[id];
+      return {
+        id: n.id,
+        label: n.label,
+        shape: 'rect',
+        description: n.attrs.length ? n.attrs.join(', ') : ''
+      };
+    });
+    return { kind: 'flow', direction: 'TD', nodes: nodes, edges: edges };
+  }
+
+  // sequenceDiagram: participants + ordered messages. Needs its own renderer —
+  // lifelines on a time axis don't fit the layered node/edge model at all.
+  // Ids may contain internal hyphens but must not end in one, otherwise
+  // `FC-->>API` back-tracks into participant "FC-" + arrow "->>" and invents a
+  // phantom participant.
+  var SEQ_ID = '[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*';
+  var SEQ_MSG_RE = new RegExp(
+    '^(' + SEQ_ID + ')\\s*(-{1,2}>>?|-{1,2}x|-{1,2}\\))\\s*(' + SEQ_ID + ')\\s*:\\s*(.*)$'
+  );
+
+  function parseMermaidSequence(src) {
+    var lines = src.split('\n')
+      .map(function(l) { return l.replace(/%%.*/, '').trim(); })
+      .filter(Boolean);
+    if (!lines.length || !/^sequenceDiagram\b/i.test(lines[0])) return null;
+
+    var labels = {}, order = [], messages = [];
+    function ensure(id) {
+      if (!labels[id]) { labels[id] = id; order.push(id); }
+    }
+
+    for (var i = 1; i < lines.length; i++) {
+      var line = lines[i];
+      var p = line.match(/^(?:participant|actor)\s+([A-Za-z0-9_-]+)(?:\s+as\s+(.+))?$/i);
+      if (p) {
+        ensure(p[1]);
+        if (p[2]) labels[p[1]] = p[2].trim();
+        continue;
+      }
+      if (/^(note|loop|alt|else|opt|par|rect|activate|deactivate|end|autonumber)\b/i.test(line)) continue;
+
+      var m = line.match(SEQ_MSG_RE);
+      if (m) {
+        ensure(m[1]);
+        ensure(m[3]);
+        messages.push({
+          from: m[1],
+          to: m[3],
+          text: (m[4] || '').trim(),
+          dashed: m[2].indexOf('--') === 0
+        });
+      }
+    }
+
+    if (order.length === 0 || messages.length === 0) return null;
+    return {
+      kind: 'sequence',
+      participants: order.map(function(id) { return { id: id, label: labels[id] }; }),
+      messages: messages
+    };
+  }
+
+  var SEQ_W = 130, SEQ_H = 38, SEQ_GAP = 44, SEQ_ROW = 46, SEQ_TOP_PAD = 24;
+
+  /** Draws participant boxes across the top, dashed vertical lifelines below
+   *  each, and one arrow per message down a time axis. */
+  function renderSequenceSVG(container, parsed) {
+    var parts = parsed.participants, msgs = parsed.messages;
+    var centers = {};
+    parts.forEach(function(p, i) { centers[p.id] = i * (SEQ_W + SEQ_GAP) + SEQ_W / 2; });
+
+    var width = parts.length * (SEQ_W + SEQ_GAP) - SEQ_GAP;
+    var lifelineTop = SEQ_H;
+    var height = lifelineTop + SEQ_TOP_PAD + msgs.length * SEQ_ROW + SEQ_TOP_PAD;
+
+    var svg = '<svg class="graph-edges-svg" width="' + width + '" height="' + height + '" style="overflow:visible;"><defs>' +
+      '<marker id="seq-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
+      '<path d="M0,0 L10,5 L0,10 z" fill="var(--vscode-charts-purple,#c586c0)"/></marker></defs>';
+
+    parts.forEach(function(p) {
+      var cx = centers[p.id];
+      svg += '<line x1="' + cx + '" y1="' + lifelineTop + '" x2="' + cx + '" y2="' + height + '" ' +
+        'stroke="var(--vscode-descriptionForeground,#888)" stroke-width="1" stroke-dasharray="4 4" opacity="0.5"/>';
+    });
+
+    msgs.forEach(function(m, i) {
+      var y = lifelineTop + SEQ_TOP_PAD + i * SEQ_ROW + SEQ_ROW / 2;
+      var x1 = centers[m.from], x2 = centers[m.to];
+      if (x1 === undefined || x2 === undefined) return;
+      if (x1 === x2) {
+        // Self-call: a small loop out to the right and back.
+        var loop = 26;
+        svg += '<path d="M' + x1 + ',' + y + ' L' + (x1 + loop) + ',' + y +
+          ' L' + (x1 + loop) + ',' + (y + 16) + ' L' + x1 + ',' + (y + 16) + '" fill="none" ' +
+          'stroke="var(--vscode-charts-purple,#c586c0)" stroke-width="1.5"' +
+          (m.dashed ? ' stroke-dasharray="5 3"' : '') + ' marker-end="url(#seq-arrow)"/>' +
+          '<text class="graph-edge-label" x="' + (x1 + loop + 6) + '" y="' + (y - 4) + '">' + esc(m.text) + '</text>';
+        return;
+      }
+      svg += '<line x1="' + x1 + '" y1="' + y + '" x2="' + x2 + '" y2="' + y + '" ' +
+        'stroke="var(--vscode-charts-purple,#c586c0)" stroke-width="1.5"' +
+        (m.dashed ? ' stroke-dasharray="5 3"' : '') + ' marker-end="url(#seq-arrow)"/>' +
+        '<text class="graph-edge-label" x="' + ((x1 + x2) / 2) + '" y="' + (y - 6) + '" text-anchor="middle">' + esc(m.text) + '</text>';
+    });
+    svg += '</svg>';
+
+    var boxes = parts.map(function(p, i) {
+      var left = i * (SEQ_W + SEQ_GAP);
+      return '<div class="graph-node shape-rect status-static" style="position:absolute; left:' + left + 'px; top:0; width:' + SEQ_W + 'px; height:' + SEQ_H + 'px;">' +
+        '<div class="graph-node-lbl">' + esc(p.label) + '</div></div>';
+    }).join('');
+
+    container.innerHTML = '<div class="graph-canvas" style="width:' + width + 'px; height:' + height + 'px;">' + svg + boxes + '</div>';
+  }
+
+  /** Tries each supported diagram type in turn; null means "we can't draw this
+   *  one" and the caller falls back to real mermaid.js. */
+  function parseMermaidDiagram(src) {
+    return parseMermaidFlowchart(src) || parseMermaidER(src) || parseMermaidSequence(src);
+  }
+
+  /** Queue of {id, parsed} entries populated by md() while building message
+   *  HTML (the target container doesn't exist in the DOM yet at that point);
+   *  flushed right after the HTML is inserted, alongside renderMermaid(). */
+  var pendingCustomGraphs = [];
+  function flushCustomGraphs() {
+    while (pendingCustomGraphs.length) {
+      var entry = pendingCustomGraphs.shift();
+      var el = document.getElementById(entry.id);
+      if (!el) continue;
+      if (entry.parsed.kind === 'sequence') {
+        renderSequenceSVG(el, entry.parsed);
+      } else {
+        renderNodeGraphSVG(el, entry.parsed.nodes, entry.parsed.edges, {
+          direction: entry.parsed.direction,
+          getStatus: function() { return 'static'; },
+          showProgress: false
+        });
+      }
+    }
   }
 
   // Clarification / Brainstorming popup logic
@@ -2721,6 +3434,7 @@ window.onerror = function(message, source, lineno, colno, error) {
   };
 
   vs.postMessage({type:'ready'});
+  vs.postMessage({type:'getApprovalMode'});
 })();
 </script>
 </body>

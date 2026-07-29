@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Message, ChatOptions, ChatResponse } from '../types';
 import { LLMProvider } from './interface';
+import { toOpenAIMessage } from './openaiMessage';
 
 /** Response shape from OpenAI-compatible /chat/completions endpoint. */
 interface OpenCodeZenResponse {
@@ -102,10 +103,7 @@ export class OpenCodeZenProvider implements LLMProvider {
   ): Record<string, unknown> {
     return {
       model: options?.model || this.model,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      })),
+      messages: messages.map(toOpenAIMessage),
       temperature: options?.temperature ?? this.temperature,
       max_tokens: options?.maxTokens ?? 4096,
       stream,

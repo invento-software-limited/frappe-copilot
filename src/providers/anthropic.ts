@@ -2,10 +2,18 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Message, ChatOptions, ChatResponse } from '../types';
+import { Message, ChatOptions, ChatResponse, ImageAttachment } from '../types';
 import { LLMProvider } from './interface';
 
 const API_KEY_SECRET = 'frappe-copilot.anthropicApiKey';
+
+/** A history message flattened to Anthropic's role model, with any hydrated
+ *  image attachments kept alongside the text until content blocks are built. */
+interface TransformedMessage {
+  role: string;
+  content: string;
+  images: ImageAttachment[];
+}
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = 'Anthropic';
@@ -214,7 +222,7 @@ export class AnthropicProvider implements LLMProvider {
     return ' This request already retried automatically and is still rate limited. Wait a moment before trying again, or check your usage limits at console.anthropic.com.';
   }
 
-  private transformMessages(messages: Message[]): { system?: string; messages: { role: string; content: string }[] } {
+  private transformMessages(messages: Message[]): { system?: string; messages: TransformedMessage[] } {
     const systemMessage = messages.find(m => m.role === 'system');
     const systemPrompt = systemMessage ? systemMessage.content : undefined;
 
@@ -225,19 +233,37 @@ export class AnthropicProvider implements LLMProvider {
         if (role !== 'assistant') {
           role = 'user';
         }
-        return { role, content: m.content };
+        // Only hydrated attachments carry base64; a path-only one (never sent
+        // through ChatPanel.hydrateImages, or whose file went missing) is
+        // dropped rather than shipped as an invalid empty image block.
+        const images = (m.images || []).filter(img => !!img.data);
+        return { role, content: m.content, images };
       });
 
-    const merged: { role: string; content: string }[] = [];
+    const merged: TransformedMessage[] = [];
     for (const msg of filtered) {
-      if (merged.length > 0 && merged[merged.length - 1].role === msg.role) {
-        merged[merged.length - 1].content += '\n\n' + msg.content;
+      const prev = merged[merged.length - 1];
+      if (prev && prev.role === msg.role) {
+        prev.content += '\n\n' + msg.content;
+        prev.images = [...prev.images, ...msg.images];
       } else {
-        merged.push(msg);
+        merged.push({ ...msg });
       }
     }
 
     return { system: systemPrompt, messages: merged };
+  }
+
+  /** Anthropic wants images *before* the text that refers to them. */
+  private toContentBlocks(msg: TransformedMessage): any[] {
+    const blocks: any[] = msg.images.map(img => ({
+      type: 'image',
+      source: { type: 'base64', media_type: img.mediaType, data: img.data },
+    }));
+    if (msg.content) {
+      blocks.push({ type: 'text', text: msg.content });
+    }
+    return blocks;
   }
 
   private getFallbackModel(model: string): string {
@@ -255,18 +281,51 @@ export class AnthropicProvider implements LLMProvider {
     return fallbacks[model] || model;
   }
 
+  /** Marks the system prompt and the last message as cache breakpoints (Anthropic
+   *  prompt caching). The system prompt is near-identical across every step of an
+   *  agent run and across turns in the same session; the last message marks the
+   *  end of "history so far", so a growing agent loop or conversation resends only
+   *  the newest content as fresh input tokens instead of the whole prefix each time.
+   *  Breakpoints under the ~1024-token minimum are silently ignored by the API, so
+   *  this is always safe to apply. */
+  private applyCacheControl(
+    system: string | undefined,
+    transformed: TransformedMessage[]
+  ): { system: any; messages: any[] } {
+    const cachedSystem = system
+      ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+      : undefined;
+
+    const messages = transformed.map((m, i) => {
+      const isLast = i === transformed.length - 1;
+      // A message with images always needs block form; a plain one only does
+      // when it carries the trailing cache breakpoint.
+      if (!isLast && m.images.length === 0) {
+        return { role: m.role, content: m.content };
+      }
+      const blocks = this.toContentBlocks(m);
+      if (isLast && blocks.length > 0) {
+        blocks[blocks.length - 1].cache_control = { type: 'ephemeral' };
+      }
+      return { role: m.role, content: blocks };
+    });
+
+    return { system: cachedSystem, messages };
+  }
+
   private buildRequestBody(
     model: string,
     system: string | undefined,
-    transformed: { role: string; content: string }[],
+    transformed: TransformedMessage[],
     temp: number | undefined,
     maxTokens: number | undefined,
     stream: boolean
   ): any {
+    const { system: cachedSystem, messages } = this.applyCacheControl(system, transformed);
     const body: any = {
       model,
-      messages: transformed,
-      system,
+      messages,
+      system: cachedSystem,
       stream,
     };
 
@@ -368,10 +427,18 @@ export class AnthropicProvider implements LLMProvider {
     const blocks: any[] = Array.isArray(data.content) ? data.content : [];
     const content = blocks.filter(b => b.type === 'text').map(b => b.text).join('');
     const reasoning = blocks.filter(b => b.type === 'thinking').map(b => b.thinking).join('');
+    const usage = data.usage;
     return {
       content,
       reasoning: reasoning || undefined,
       model: data.model || this.model,
+      usage: usage ? {
+        promptTokens: usage.input_tokens || 0,
+        completionTokens: usage.output_tokens || 0,
+        totalTokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
+        cacheReadTokens: usage.cache_read_input_tokens || 0,
+        cacheWriteTokens: usage.cache_creation_input_tokens || 0,
+      } : undefined,
     };
   }
 
@@ -530,6 +597,14 @@ export class AnthropicProvider implements LLMProvider {
                   reasoning: chunk.delta.thinking || '',
                   model: modelToUse,
                 };
+              } else if (chunk.type === 'message_start' && chunk.message?.usage) {
+                // Surfaces prompt-cache effectiveness for this step: a high
+                // cacheReadTokens relative to input_tokens confirms the cache_control
+                // breakpoints in buildRequestBody are actually being hit.
+                const u = chunk.message.usage;
+                if (u.cache_read_input_tokens || u.cache_creation_input_tokens) {
+                  console.log(`[Anthropic] cache read=${u.cache_read_input_tokens || 0} write=${u.cache_creation_input_tokens || 0} fresh=${u.input_tokens || 0}`);
+                }
               }
             } catch {
               // Skip other stream events

@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <title>TeamResource List View - Frappe Desk</title>
+  <link rel="stylesheet" href="list-view-template.css">
+  <link rel="stylesheet" href="inter-variable-fontface.css">
+</head>
+<body>
+
+  <!-- Hidden SVG sprite containing icons -->
+  <svg style="display:none;" id="frappe-icon-sprite">
+    <!-- home icon -->
+    <symbol id="icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+      <polyline points="9 22 9 12 15 12 15 22"></polyline>
+    </symbol>
+    <!-- chevron-down icon -->
+    <symbol id="icon-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m6 9 6 6 6-6"></path>
+    </symbol>
+    <!-- list icon -->
+    <symbol id="icon-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="8" y1="6" x2="21" y2="6"></line>
+      <line x1="8" y1="12" x2="21" y2="12"></line>
+      <line x1="8" y1="18" x2="21" y2="18"></line>
+      <line x1="3" y1="6" x2="3.01" y2="6"></line>
+      <line x1="3" y1="12" x2="3.01" y2="12"></line>
+      <line x1="3" y1="18" x2="3.01" y2="18"></line>
+    </symbol>
+    <!-- select (double chevron) icon -->
+    <symbol id="icon-select" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m7 15 5 5 5-5"></path>
+      <path d="m7 9 5-5 5 5"></path>
+    </symbol>
+    <!-- reload / refresh icon -->
+    <symbol id="es-line-reload" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19 12a7 7 0 0 1-7 7 7 7 0 0 1-7-7 7 7 0 0 1 7-7 7 7 0 0 1 5.3 2.4l-1.8 1.8H21V3.2l-1.8 1.8A8.9 8.9 0 0 0 12 3a9 9 0 0 0-9 9 9 9 0 0 0 9 9 9 9 0 0 0 9-9h-2z"></path>
+    </symbol>
+    <!-- dot-horizontal icon -->
+    <symbol id="icon-dot-horizontal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="1"></circle>
+      <circle cx="19" cy="12" r="1"></circle>
+      <circle cx="5" cy="12" r="1"></circle>
+    </symbol>
+    <!-- add icon -->
+    <symbol id="icon-add" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 12h14"></path>
+      <path d="M12 5v14"></path>
+    </symbol>
+    <!-- search icon -->
+    <symbol id="icon-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </symbol>
+    <!-- notification / bell icon -->
+    <symbol id="icon-notification" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+    </symbol>
+    <!-- checklist icon -->
+    <symbol id="icon-checklist" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m9 11 3 3L22 4"></path>
+      <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+    </symbol>
+    <!-- bug icon -->
+    <symbol id="icon-bug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect width="8" height="14" x="8" y="5" rx="4"></rect>
+      <path d="M19 7h-3"></path>
+      <path d="M5 7h3"></path>
+      <path d="M19 12h-3"></path>
+      <path d="M5 12h3"></path>
+      <path d="M19 17h-3"></path>
+      <path d="M5 17h3"></path>
+      <path d="m6 21 2-2"></path>
+      <path d="m18 21-2-2"></path>
+    </symbol>
+    <!-- folder icon -->
+    <symbol id="icon-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"></path>
+    </symbol>
+    <!-- warning icon -->
+    <symbol id="icon-warning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+      <line x1="12" y1="9" x2="12" y2="13"></line>
+      <line x1="12" y1="17" x2="12.01" y2="17"></line>
+    </symbol>
+    <!-- user / team icon -->
+    <symbol id="icon-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+      <circle cx="12" cy="7" r="4"></circle>
+    </symbol>
+    <!-- clock icon -->
+    <symbol id="icon-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"></circle>
+      <polyline points="12 6 12 12 16 14"></polyline>
+    </symbol>
+    <!-- book icon -->
+    <symbol id="icon-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+    </symbol>
+    <!-- sync icon -->
+    <symbol id="icon-sync" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+    </symbol>
+    <!-- equal-approximately icon -->
+    <symbol id="icon-equal-approximately" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M5 9h14"></path>
+      <path d="M5 15h14"></path>
+      <path d="M6 10a1.5 1.5 0 0 1 3 0c0 1-1.5 1.5-1.5 1.5H6"></path>
+    </symbol>
+    <!-- filter icon -->
+    <symbol id="es-line-filter" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M4.25 5.61C6.27 8.2 10 13 10 13v6c0 .55.45 1 1 1h2c.55 0 1-.45 1-1v-6s3.72-4.8 5.74-7.39A1 1 0 0 0 19 4H5a1 1 0 0 0-.75 1.61z"></path>
+    </symbol>
+    <!-- small-close icon -->
+    <symbol id="es-small-close" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"></path>
+    </symbol>
+    <!-- sort descending icon -->
+    <symbol id="icon-sort-descending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 5h10"></path>
+      <path d="M11 9h10"></path>
+      <path d="M11 13h10"></path>
+      <path d="M11 17h10"></path>
+      <path d="M3 17l3 3 3-3"></path>
+      <path d="M6 18V4"></path>
+    </symbol>
+    <!-- unliked heart icon -->
+    <symbol id="icon-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"></path>
+    </symbol>
+    <!-- chat bubble icon -->
+    <symbol id="es-line-chat-alt" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"></path>
+    </symbol>
+  </svg>
+
+  <div class="app-shell">
+    <!-- Left App Sidebar (0. App shell with warm off-white bg) -->
+    <aside class="body-sidebar">
+      <!-- Sidebar Header (Circular Logo & Dual-line Workspace Name + Chevron) -->
+      <a class="sidebar-header" href="#">
+        <div class="sidebar-logo">C</div>
+        <div class="title-container">
+          <span class="sidebar-app-title">Cadence</span>
+          <span class="sidebar-subtitle">Cadence</span>
+        </div>
+        <svg class="icon icon-xs icon-grey"><use href="#icon-chevron-down"></use></svg>
+      </a>
+      
+      <!-- Navigation items -->
+      <div class="sidebar-items">
+        <a href="#" class="standard-sidebar-item">
+          <span class="sidebar-item-label">
+            <svg class="icon icon-sm icon-grey"><use href="#icon-search"></use></svg> Search
+          </span>
+          <span class="sidebar-item-shortcut">Ctrl+K</span>
+        </a>
+        <a href="#" class="standard-sidebar-item">
+          <span class="sidebar-item-label">
+            <svg class="icon icon-sm icon-grey"><use href="#icon-notification"></use></svg> Notification
+          </span>
+        </a>
+
+        <!-- Flat items before collapsible groups -->
+        <a href="#" class="standard-sidebar-item">
+          <span class="sidebar-item-label">
+            <svg class="icon icon-sm icon-grey"><use href="#icon-checklist"></use></svg> Cash Flow
+          </span>
+        </a>
+        <a href="#" class="standard-sidebar-item">
+          <span class="sidebar-item-label">
+            <svg class="icon icon-sm icon-grey"><use href="#icon-checklist"></use></svg> Milestones & Billing
+          </span>
+        </a>
+        <a href="#" class="standard-sidebar-item">
+          <span class="sidebar-item-label">
+            <svg class="icon icon-sm icon-grey"><use href="#icon-user"></use></svg> Client Billing
+          </span>
+        </a>
+        <a href="#" class="standard-sidebar-item">
+          <span class="sidebar-item-label">
+            <svg class="icon icon-sm icon-grey"><use href="#icon-sync"></use></svg> Change Requests
+          </span>
+        </a>
+
+        <!-- Team (Active child folder) -->
+        <div class="sidebar-group">
+          <div class="sidebar-group-header">
+            <span class="sidebar-item-label">
+              <svg class="icon icon-sm icon-grey"><use href="#icon-folder"></use></svg> Team
+            </span>
+            <svg class="icon icon-xs icon-grey"><use href="#icon-chevron-down"></use></svg>
+          </div>
+          <div class="sidebar-children">
+            <a href="#" class="standard-sidebar-item active">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-user"></use></svg> Team Resources
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-user"></use></svg> Capacity Plans
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-clock"><use href="#icon-clock"></use></svg> Timesheets
+              </span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Operations -->
+        <div class="sidebar-group">
+          <div class="sidebar-group-header">
+            <span class="sidebar-item-label">
+              <svg class="icon icon-sm icon-grey"><use href="#icon-folder"></use></svg> Operations
+            </span>
+            <svg class="icon icon-xs icon-grey"><use href="#icon-chevron-down"></use></svg>
+          </div>
+          <div class="sidebar-children">
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-orange"><use href="#icon-warning"></use></svg> Incidents
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-book"></use></svg> Runbooks
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-sync"></use></svg> Team Syncs
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-checklist"></use></svg> Daily Reports
+              </span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Portfolio & Reports -->
+        <div class="sidebar-group">
+          <div class="sidebar-group-header">
+            <span class="sidebar-item-label">
+              <svg class="icon icon-sm icon-grey"><use href="#icon-folder"></use></svg> Portfolio & Reports
+            </span>
+            <svg class="icon icon-xs icon-grey"><use href="#icon-chevron-down"></use></svg>
+          </div>
+          <div class="sidebar-children">
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-folder"></use></svg> Portfolio Overview
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-checklist"></use></svg> Velocity & Cost
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-checklist"></use></svg> Cash Flow & Billing
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-checklist"></use></svg> Delivery & Schedule
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-warning"></use></svg> Risk & Issues
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-user"></use></svg> Resources & Ops
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-checklist"></use></svg> Strategy & Revenue
+              </span>
+            </a>
+            <a href="#" class="standard-sidebar-item">
+              <span class="sidebar-item-label">
+                <svg class="icon icon-sm icon-grey"><use href="#icon-checklist"></use></svg> Reports & Velocity
+              </span>
+            </a>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- User avatar footer with green profile circle -->
+      <div class="sidebar-footer">
+        <div class="user-avatar">A</div>
+        <div class="user-info">
+          <span class="user-name">Administrator</span>
+          <span class="user-email">admin@example.com</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-area">
+      <!-- Breadcrumb and page action cluster -->
+      <header class="page-head">
+        <ul class="nav-breadcrumbs">
+          <li><a href="/desk"><svg class="icon icon-sm"><use href="#icon-home"></use></svg></a></li>
+          <li><span class="current-title">TeamResource</span></li>
+        </ul>
+        <div class="page-actions">
+          <div class="btn-group">
+            <button class="btn btn-default ellipsis">
+              <svg class="icon icon-sm"><use href="#icon-list"></use></svg>
+              List View
+              <svg class="icon icon-xs"><use href="#icon-select"></use></svg>
+            </button>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-default ellipsis">
+              <svg class="es-icon icon-xs"><use href="#es-line-filter"></use></svg>
+              Saved Filters
+              <svg class="icon icon-xs"><use href="#icon-select"></use></svg>
+            </button>
+          </div>
+          <button class="btn btn-default icon-btn" title="Refresh">
+            <svg class="es-icon icon-sm"><use href="#es-line-reload"></use></svg>
+          </button>
+          <button class="btn btn-default icon-btn" title="Menu">
+            <svg class="icon icon-sm"><use href="#icon-dot-horizontal"></use></svg>
+          </button>
+          <button class="btn btn-primary btn-sm">
+            <svg class="icon icon-xs" style="stroke:white"><use href="#icon-add"></use></svg>
+            Add TeamResource
+          </button>
+        </div>
+      </header>
+
+      <!-- Standard filter toolbar with border-bottom -->
+      <section class="page-form">
+        <div class="standard-filter-section">
+          <!-- Text filter -->
+          <div class="input-group input-max-width">
+            <input type="text" class="form-control" placeholder="ID">
+            <div class="input-group-btn">
+              <button class="btn btn-default match-type-dropdown-btn">
+                <svg class="icon icon-xs"><use href="#icon-equal-approximately"></use></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="filter-section">
+          <!-- Filter trigger -->
+          <div class="btn-group">
+            <button class="btn btn-default">
+              <svg class="es-icon icon-sm"><use href="#es-line-filter"></use></svg>
+              <span>Filter</span>
+            </button>
+            <button class="btn btn-default" title="Clear all filters">
+              <svg class="es-icon icon-sm"><use href="#es-small-close"></use></svg>
+            </button>
+          </div>
+          <!-- Sort Selector -->
+          <div class="btn-group">
+            <button class="btn btn-default">
+              <svg class="icon icon-sm"><use href="#icon-sort-descending"></use></svg>
+              <span>Last Updated On</span>
+              <svg class="icon icon-sm"><use href="#icon-chevron-down"></use></svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Results list view area -->
+      <section class="frappe-list">
+        <div class="result-container">
+          
+          <!-- Sticky Header Row (.list-row-head) -->
+          <div class="list-row-head">
+            <div class="level-left">
+              <div class="list-row-col list-subject">
+                <span class="select-like">
+                  <input type="checkbox" class="select-all-checkbox">
+                </span>
+                <span>ID</span>
+              </div>
+              <div class="list-row-col">Resource Type</div>
+              <div class="list-row-col">Resource Name</div>
+              <div class="list-row-col">Role Level</div>
+              <div class="list-row-col">Status</div>
+            </div>
+            <div class="level-right">
+              <span class="list-count" style="margin-right: 12px; font-size:12px; color:var(--text-muted)">9 of 9</span>
+              <span class="like-icon" title="Liked by me">
+                <svg class="icon icon-sm"><use href="#icon-heart"></use></svg>
+              </span>
+            </div>
+          </div>
+
+          <!-- 9 rows corresponding exactly to the screenshot -->
+          <!-- Row 1 -->
+          <div class="list-row-container">
+            <div class="list-row">
+              <div class="level-left">
+                <div class="list-row-col list-subject bold">
+                  <span class="select-like"><input type="checkbox" class="list-row-checkbox"></span>
+                  <a href="#">TEAM-00009</a>
+                </div>
+                <div class="list-row-col">
+                  <span class="dot-value">PM</span>
+                </div>
+                <div class="list-row-col">Abdullah Al Munim</div>
+                <div class="list-row-col">
+                  <span class="dot-value">Senior</span>
+                </div>
+                <div class="list-row-col">
+                  <span class="indicator-pill green">Available</span>
+                </div>
+              </div>
+              <div class="level-right">
+                <div class="list-row-activity">
+                  <span class="modified">1 w</span>
+                  <span class="comment-count-group">
+                    <svg class="es-icon icon-sm"><use href="#es-line-chat-alt"></use></svg>
+                    <span>0</span>
+                  </span>
+                  <span style="color:var(--gray-300)">-</span>
+                  <span class="list-row-like select-like">
+                    <svg class="like-icon icon-sm"><use href="#icon-heart"></use></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 2 -->
+          <div class="list-row-container">
+            <div class="list-row">
+              <div class="level-left">
+                <div class="list-row-col list-subject bold">
+                  <span class="select-like"><input type="checkbox" class="list-row-checkbox"></span>
+                  <a href="#">TEAM-00001</a>
+                </div>
+                <div class="list-row-col">
+                  <span class="dot-value">PM</span>
+                </div>
+                <div class="list-row-col">Abdullah Al Munim</div>
+                <div class="list-row-col">
+                  <span class="dot-value">Senior</span>
+                </div>
+                <div class="list-row-col">
+                  <span class="indicator-pill green">Available</span>
+                </div>
+              </div>
+              <div class="level-right">
+                <div class="list-row-activity">
+                  <span class="modified">1 w</span>
+                  <span class="comment-count-group">
+                    <svg class="es-icon icon-sm"><use href="#es-line-chat-alt"></use></svg>
+                    <span>0</span>
+                  </span>
+                  <span style="color:var(--gray-300)">-</span>
+                  <span class="list-row-like select-like">
+                    <svg class="like-icon icon-sm"><use href="#icon-heart"></use></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 3 -->
+          <div class="list-row-container">
+            <div class="list-row">
+              <div class="level-left">
+                <div class="list-row-col list-subject bold">
+                  <span class="select-like"><input type="checkbox" class="list-row-checkbox"></span>
+                  <a href="#">TEAM-00008</a>
+                </div>
+                <div class="list-row-col">
+                  <span class="dot-value">PM</span>
+                </div>
+                <div class="list-row-col">QA PM</div>
+                <div class="list-row-col">
+                  <span class="dot-value">Senior</span>
+                </div>
+                <div class="list-row-col">
+                  <span class="indicator-pill green">Available</span>
+                </div>
+              </div>
+              <div class="level-right">
+                <div class="list-row-activity">
+                  <span class="modified">1 w</span>
+                  <span class="comment-count-group">
+                    <svg class="es-icon icon-sm"><use href="#es-line-chat-alt"></use></svg>
+                    <span>0</span>
+                  </span>
+                  <span style="color:var(--gray-300)">-</span>
+                  <span class="list-row-like select-like">
+                    <svg class="like-icon icon-sm"><use href="#icon-heart"></use></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 4 -->
+          <div class="list-row-container">
+            <div class="list-row">
+              <div class="level-left">
+                <div class="list-row-col list-subject bold">
+                  <span class="select-like"><input type="checkbox" class="list-row-checkbox"></span>
+                  <a href="#">TEAM-00007</a>
+                </div>
+                <div class="list-row-col">
+                  <span class="dot-value">DevOps</span>
+                </div>
+                <div class="list-row-col">QA DevOps</div>
+                <div class="list-row-col">
+                  <span class="dot-value">Senior</span>
+                </div>
+                <div class="list-row-col">
+                  <span class="indicator-pill green">Available</span>
+                </div>
+              </div>
+              <div class="level-right">
+                <div class="list-row-activity">
+                  <span class="modified">1 w</span>
+                  <span class="comment-count-group">
+                    <svg class="es-icon icon-sm"><use href="#es-line-chat-alt"></use></svg>
+                    <span>0</span>
+                  </span>
+                  <span style="color:var(--gray-300)">-</span>
+                  <span class="list-row-like select-like">
+                    <svg class="like-icon icon-sm"><use href="#icon-heart"></use></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 5 -->
+          <div class="list-row-container">
+            <div class="list-row">
+              <div class="level-left">
+                <div class="list-row-col list-subject bold">
+                  <span class="select-like"><input type="checkbox" class="list-row-checkbox"></span>
+                  <a href="#">TEAM-00006</a>
+                </div>
+                <div class="list-row-col">
+                  <span class="dot-value">QA</span>
+                </div>
+                <div class="list-row-col">QA QA</div>
+                <div class="list-row-col">
+                  <span class="dot-value">Senior</span>
+                </div>
+                <div class="list-row-col">
+                  <span class="indicator-pill green">Available</span>
+                </div>
+              </div>
+              <div class="level-right">
+                <div class="list-row-activity">
+                  <span class="modified">1 w</span>
+                  <span class="comment-count-group">
+                    <svg class="es-icon icon-sm"><use href="#es-line-chat-alt"></use></svg>
+                    <span>0</span>
+                  </span>
+                  <span style="color:var(--gray-300)">-</span>
+                  <span class="list-row-like select-like">
+                    <svg class="like-icon icon-sm"><use href="#icon-heart"></use></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 6 -->
+          <div class="list-row-container">
+            <div class="list-row">
+              <div class="level-left">
+                <div class="list-row-col list-subject bold">
+                  <span class="select-like"><input type="checkbox" class="list-row-checkbox"></span>
+                  <a href="#">TEAM-00005</a>
+                </div>
+                <div class="list-row-col">
+                  <span class="dot-value">Designer</span>
+                </div>
+                <div class="list-row-col">QA Designer</div>
+                <div class="list-row-col">
+                  <span class="dot-value">Senior</span>
+                </div>
+                <div class="list-row-col">
+                  <span class="indicator-pill green">Available</span>
+                </div>
+              </div>
+              <div class="level-right">
+                <div class="list-row-activity">
+                  <span class="modified">1 w</span>
+                  <span class="comment-count-group">
+                    <svg class="es-icon icon-sm"><use href="#es-line-chat-alt"></use></svg>
+                    <span>0</span>
+                  </span>
+                  <span style="color:var(--gray-300)">-</span>
+                  <span class="list-row-like select-like">
+                    <svg class="like-icon icon-sm"><use href="#icon-heart"></use></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 7 -->
+          <div class="list-row-container">
+            <div class="list-row">
+              <div class="level-left">
+                <div class="list-row-col list-subject bold">
+                  <span class="select-like"><input type="checkbox" class="list-row-checkbox"></span>
+                  <a href="#">TEAM-00004</a>
+                </div>
+                <div class="list-row-col">
+                  <span class="dot-value">Engineer</span>
+                </div>
+                <div class="list-row-col">QA Engineer</div>
+                <div class="list-row-col">
+                  <span class="dot-value">Senior</span>
+                </div>
+                <div class="list-row-col">
+                  <span class="indicator-pill green">Available</span>
+                </div>
+              </div>
+              <div class="level-right">
+                <div class="list-row-activity">
+                  <span class="modified">1 w</span>
+                  <span class="comment-count-group">
+                    <svg class="es-icon icon-sm"><use href="#es-line-chat-alt"></use></svg>
+                    <span>0</span>
+                  </span>
+                  <span style="color:var(--gray-300)">-</span>
+                  <span class="list-row-like select-like">
+                    <svg class="like-icon icon-sm"><use href="#icon-heart"></use></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 8 -->
+          <div class="list-row-container">
+            <div class="list-row">
+              <div class="level-left">
+                <div class="list-row-col list-subject bold">
+                  <span class="select-like"><input type="checkbox" class="list-row-checkbox"></span>
+                  <a href="#">TEAM-00003</a>
+                </div>
+                <div class="list-row-col">
+                  <span class="dot-value">PM</span>
+                </div>
+                <div class="list-row-col">Ajoy Chandra Roy</div>
+                <div class="list-row-col">
+                  <span class="dot-value">Senior</span>
+                </div>
+                <div class="list-row-col">
+                  <span class="indicator-pill green">Available</span>
+                </div>
+              </div>
+              <div class="level-right">
+                <div class="list-row-activity">
+                  <span class="modified">1 w</span>
+                  <span class="comment-count-group">
+                    <svg class="es-icon icon-sm"><use href="#es-line-chat-alt"></use></svg>
+                    <span>0</span>
+                  </span>
+                  <span style="color:var(--gray-300)">-</span>
+                  <span class="list-row-like select-like">
+                    <svg class="like-icon icon-sm"><use href="#icon-heart"></use></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Row 9 -->
+          <div class="list-row-container">
+            <div class="list-row">
+              <div class="level-left">
+                <div class="list-row-col list-subject bold">
+                  <span class="select-like"><input type="checkbox" class="list-row-checkbox"></span>
+                  <a href="#">TEAM-00002</a>
+                </div>
+                <div class="list-row-col">
+                  <span class="dot-value">Engineer</span>
+                </div>
+                <div class="list-row-col">Abdul Monim</div>
+                <div class="list-row-col">
+                  <span class="dot-value">Senior</span>
+                </div>
+                <div class="list-row-col">
+                  <span class="indicator-pill green">Available</span>
+                </div>
+              </div>
+              <div class="level-right">
+                <div class="list-row-activity">
+                  <span class="modified">1 w</span>
+                  <span class="comment-count-group">
+                    <svg class="es-icon icon-sm"><use href="#es-line-chat-alt"></use></svg>
+                    <span>0</span>
+                  </span>
+                  <span style="color:var(--gray-300)">-</span>
+                  <span class="list-row-like select-like">
+                    <svg class="like-icon icon-sm"><use href="#icon-heart"></use></svg>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Paging Footer Area -->
+      <footer class="list-paging-area">
+        <div class="page-lengths">
+          <button class="page-length-btn active">20</button>
+          <button class="page-length-btn">100</button>
+          <button class="page-length-btn">500</button>
+          <button class="page-length-btn">2500</button>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+</body>
+</html>

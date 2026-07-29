@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Message, ChatOptions, ChatResponse } from '../types';
 import { LLMProvider } from './interface';
+import { toOpenAIMessage } from './openaiMessage';
 
 const API_KEY_SECRET = 'frappe-copilot.openaiApiKey';
 
@@ -64,7 +65,7 @@ export class OpenAIProvider implements LLMProvider {
     const headers = await this.buildHeaders();
     const body = {
       model: options?.model || this.model,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      messages: messages.map(toOpenAIMessage),
       temperature: options?.temperature ?? this.temperature,
       stream: false,
     };
@@ -97,7 +98,7 @@ export class OpenAIProvider implements LLMProvider {
     const headers = await this.buildHeaders();
     const body = {
       model: options?.model || this.model,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
+      messages: messages.map(toOpenAIMessage),
       temperature: options?.temperature ?? this.temperature,
       stream: true,
     };

@@ -3,10 +3,28 @@
 /** Role that an LLM model can serve — used for future per-role routing. */
 export type ModelRole = 'chat' | 'planning' | 'coding' | 'vision';
 
+/** An image attached to a user message.
+ *
+ *  Persisted (in messages.jsonl) as a `path` reference only — base64 for even a
+ *  modest screenshot is hundreds of KB, and every session read parses that whole
+ *  file. `data` is filled in lazily by ChatPanel.hydrateImages() on the in-memory
+ *  copy handed to a provider, and is the only field providers read. */
+export interface ImageAttachment {
+  /** e.g. 'image/png' — the subset Anthropic accepts (png, jpeg, gif, webp). */
+  mediaType: string;
+  name?: string;
+  /** Absolute path under .frappe-copilot/uploads. Set on persisted messages. */
+  path?: string;
+  /** Raw base64 (no data: prefix). Set only on the provider-bound copy. */
+  data?: string;
+}
+
 /** A single message in a chat conversation. */
 export interface Message {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Images attached to a user message, for vision-capable providers. */
+  images?: ImageAttachment[];
   /** Set on the summary message a task-specialized agent leaves in the main
    *  transcript — lets the UI show which specialist handled the turn and
    *  fetch its full step-by-step run via `runId` (see SessionStore.readRunTranscript). */
@@ -40,6 +58,9 @@ export interface ChatResponse {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    /** Tokens served from Anthropic's prompt cache (near-free) vs. freshly written to it. */
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
   };
 }
 

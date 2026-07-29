@@ -392,7 +392,8 @@ async function createNewSkill(): Promise<void> {
 
   const filePath = skillsStore.createSkill(name.trim(), (description || '').trim());
   skillsProvider?.refresh();
-  chatPanel?.notifySkillsChanged();
+  // createSkill returns the file path; its id is the basename minus '.md'.
+  chatPanel?.notifySkillCreated(path.basename(filePath, '.md'));
   const doc = await vscode.workspace.openTextDocument(filePath);
   await vscode.window.showTextDocument(doc);
 }
@@ -439,7 +440,7 @@ async function importSkillFromFile(): Promise<void> {
   }
 
   skillsProvider?.refresh();
-  chatPanel?.notifySkillsChanged();
+  chatPanel?.notifySkillCreated(result.id!);
   vscode.window.showInformationMessage(`Frappe Copilot: Imported skill '${result.id}'.`);
 }
 

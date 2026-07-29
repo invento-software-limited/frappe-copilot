@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { Message, ChatOptions, ChatResponse } from '../types';
+import { Message, ChatOptions, ChatResponse, ImageAttachment } from '../types';
 import { LLMProvider } from './interface';
 
 /**
@@ -70,7 +70,7 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
    *  than using the SDK's session `resume` — so folding prior turns into the prompt
    *  keeps behavior identical to the direct-API provider instead of tying state to a
    *  Claude Code session id. */
-  private buildPrompt(messages: Message[]): { system?: string; prompt: string } {
+  private buildPrompt(messages: Message[]): { system?: string; prompt: string; images: ImageAttachment[] } {
     const system = messages.find(m => m.role === 'system')?.content;
     const turns = messages.filter(m => m.role !== 'system');
 
@@ -84,8 +84,12 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
       }
     }
 
+    // The whole history collapses into one prompt, so every image in it has to
+    // ride along on that single turn regardless of which message it came from.
+    const images = messages.flatMap(m => (m.images || []).filter(img => !!img.data));
+
     if (merged.length === 0) {
-      return { system, prompt: '' };
+      return { system, prompt: '', images };
     }
 
     const last = merged[merged.length - 1];
@@ -101,7 +105,29 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     }
     prompt += last.content;
 
-    return { system, prompt };
+    return { system, prompt, images };
+  }
+
+  /** `query()` takes either a plain string or a stream of user messages. Images
+   *  can only be expressed as content blocks, so an attachment forces the
+   *  second form — a single-message async iterable carrying image blocks
+   *  followed by the same prompt text the string form would have used. */
+  private async *imagePromptStream(
+    prompt: string,
+    images: ImageAttachment[]
+  ): AsyncIterable<any> {
+    const content: any[] = images.map(img => ({
+      type: 'image',
+      source: { type: 'base64', media_type: img.mediaType, data: img.data },
+    }));
+    content.push({ type: 'text', text: prompt });
+
+    yield {
+      type: 'user',
+      message: { role: 'user', content },
+      parent_tool_use_id: null,
+      session_id: '',
+    };
   }
 
   private describeSdkError(error: string | undefined, status: number | null | undefined): string {
@@ -153,7 +179,7 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     abortSignal?: AbortSignal
   ): AsyncIterable<ChatResponse> {
     const sdk = await this.getSdk();
-    const { system, prompt } = this.buildPrompt(messages);
+    const { system, prompt, images } = this.buildPrompt(messages);
     const modelToUse = options?.model || this.model;
 
     const controller = new AbortController();
@@ -184,7 +210,10 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     let errorMessage: string | undefined;
 
     try {
-      const stream = sdk.query({ prompt, options: sdkOptions as any });
+      const stream = sdk.query({
+        prompt: images.length > 0 ? this.imagePromptStream(prompt, images) as any : prompt,
+        options: sdkOptions as any
+      });
       for await (const msg of stream as AsyncIterable<SDKMessage>) {
         if (abortSignal?.aborted) return;
 
