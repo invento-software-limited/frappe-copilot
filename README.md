@@ -8,64 +8,37 @@ live bench command execution, and a visual workflow graph.
 
 ## Features
 
-- **💬 AI Chat with Streaming** — Conversational Frappe/ERPNext assistant with real-time streaming responses
-- **🔍 Auto Bench Detection** — Automatically detects your bench environment (host shell or Docker container)
-- **⚡ 100+ Bench Commands** — Pre-configured `bench` CLI commands across 17 categories with safety confirmation gates for destructive operations
-- **🔄 Multi-Provider** — Switch between OpenCode Zen, OpenAI, and Anthropic on the fly
-- **📂 Session Management** — Multiple persistent chat sessions with message history (JSONL) and evolving context files
-- **🤖 Agentic Tool Loop** — Autonomous multi-step execution: the AI can read files, write/edit code, run commands, search the web, inspect DocTypes, and more — all with user approval for high-risk actions
-- **📊 Visual Workflow Graph** — Real-time agent execution graph rendered inside the chat panel
-- **📎 Code Mention** — Select code in any editor and insert it as a context mention (Ctrl+Alt+M / Cmd+Alt+M)
-- **📄 File Upload** — Upload PDFs and text files for analysis (text extraction via pdfjs-dist)
-- **🧠 RAG Vector Store** — Semantic search over Frappe documentation and code templates built into the agent context
-- **💾 Persistent Skills Memory** — The AI saves reusable patterns and checklists to `.frappe-copilot/skills_memory.md` across sessions
-- **✅ Interactive Todo List** — The AI can create, update, and track a todo list that renders in the chat UI
-- **🔧 In-Chat Settings** — Configure API key, endpoint, provider, and model directly inside the chat panel
-- **🛡️ Tool Approval System** — `write_file`, `edit_file`, and `execute_command` always prompt for user confirmation before execution
-- **🔁 Auto-Healing** — After writing or editing code files, the agent runs syntax validation (`py_compile` for Python, `node -c` for JavaScript) and reports warnings
-- **🧭 Schema Introspection** — Automatically queries your active Frappe site to discover installed apps and DocTypes
+- **🤖 Multi-Agent Orchestration & Routing** — Automatically route complex requests to task-specific sub-agents (DocType/Schema Builder, Server-side Logic, Client UI, Bench/DevOps, Research, Architecture) with persistent transcripts and self-verification (e.g. running migrations and tests with self-correction loops).
+- **🔑 Anthropic OAuth & Claude Code Session** — Direct OAuth login flow for Anthropic/Claude with automatic token refreshing, secure credential storage, and rate-limit handling.
+- **🖼️ Multimodal OpenAI Message Support** — Send and render rich multimodal messages (including images and file attachments) in OpenAI-compatible API providers.
+- **📚 Custom Developer Skills** — Create, import, and execute custom developer skills (YAML/Markdown-based checklists and instructions like `frappe-app-dev`) to standardize workflows.
+- **💬 AI Chat with Streaming** — Conversational Frappe/ERPNext assistant with real-time streaming responses.
+- **🔍 Auto Bench Detection** — Automatically detects your bench environment (host shell or Docker container).
+- **⚡ 100+ Bench Commands** — Pre-configured `bench` CLI commands across 17 categories with safety confirmation gates for destructive operations.
+- **🔄 Multi-Provider** — Switch between OpenCode Zen, OpenAI, Anthropic, and Claude Code on the fly.
+- **📂 Session Management** — Multiple persistent chat sessions with message history (JSONL) and evolving context files.
+- **🤖 Agentic Tool Loop** — Autonomous multi-step execution: the AI can read files, write/edit code, run commands, search the web, inspect DocTypes, and more — all with user approval for high-risk actions.
+- **📊 Visual Workflow Graph** — Real-time agent execution graph rendered inside the chat panel.
+- **📎 Code Mention** — Select code in any editor and insert it as a context mention (Ctrl+Alt+M / Cmd+Alt+M).
+- **📄 File Upload** — Upload PDFs and text files for analysis (text extraction via pdfjs-dist).
+- **🧠 RAG Vector Store** — Semantic search over Frappe documentation and code templates built into the agent context.
+- **💾 Persistent Skills Memory** — The AI saves reusable patterns and checklists to `.frappe-copilot/skills_memory.md` across sessions.
+- **✅ Interactive Todo List** — The AI can create, update, and track a todo list that renders in the chat UI.
+- **🔧 In-Chat Settings** — Configure API key, endpoint, provider, and model directly inside the chat panel.
+- **🛡️ Tool Approval System** — `write_file`, `edit_file`, and `execute_command` always prompt for user confirmation before execution.
+- **🔁 Auto-Healing** — After writing or editing code files, the agent runs syntax validation (`py_compile` for Python, `node -c` for JavaScript) and reports warnings.
+- **🧭 Schema Introspection** — Automatically queries your active Frappe site to discover installed apps and DocTypes.
 
 ## Getting Started
 
 ### 1. Install the extension
 
-Choose one of the following methods:
+To install the extension from the compiled VSIX package:
 
-#### Option A: VS Code Marketplace (recommended)
-
-1. Open VS Code
-2. Go to the **Extensions** view (Ctrl+Shift+X / Cmd+Shift+X)
-3. Search for **"Frappe Copilot"**
-4. Click **Install**
-
-> **Note:** The marketplace listing is coming soon. Until then, use Option B or C.
-
-#### Option B: Install from VSIX file (recommended until marketplace is live)
-
-The VSIX package is automatically built by GitHub Actions whenever a new version tag is pushed.
-
-1. Go to the [Releases page](https://github.com/invento-software-limited/frappe-copilot/releases)
-2. Download the latest `frappe-copilot-v*.vsix` asset
-3. In VS Code, press **Ctrl+Shift+P** (or **Cmd+Shift+P**) to open the Command Palette
-4. Run **Extensions: Install from VSIX...**
-5. Select the downloaded `.vsix` file
-
-#### Option C: Build from source
-
-```bash
-# Clone the repository
-git clone https://github.com/invento-software-limited/frappe-copilot.git
-cd frappe-copilot
-
-# Install dependencies and compile
-npm install
-npm run compile
-```
-
-Then in VS Code:
-
-1. Press **Ctrl+Shift+P** → **Developer: Install Extension from Location...** and select the `frappe-copilot` folder
-2. Or press **F5** to launch the Extension Development Host for testing
+1. Download the latest `frappe-copilot-1.0.0.vsix` asset.
+2. In VS Code, press **Ctrl+Shift+P** (or **Cmd+Shift+P**) to open the Command Palette.
+3. Run the command **Extensions: Install from VSIX...**.
+4. Select the downloaded `.vsix` file to install it.
 
 ### 2. Set up your API key
 
@@ -99,6 +72,8 @@ You can re-detect at any time via **Frappe Copilot: Configure Bench Environment*
 | `Frappe Copilot: Run Bench Command...` | Browse categories and run a pre-configured bench command |
 | `Frappe Copilot: Show Configuration` | Open the extension settings page |
 | `Frappe Copilot: Mention Selected Code` | Insert selected editor text as a context mention into the chat |
+| `Frappe Copilot: New Skill` | Create a new custom developer skill |
+| `Frappe Copilot: Import Skill (.md/.zip)` | Import a custom developer skill from a Markdown template or a zip package |
 
 ## Configuration
 
@@ -107,8 +82,14 @@ All settings are available under `File → Preferences → Settings → Extensio
 ### Provider Selection
 
 ```json
-"frappe-copilot.provider": "opencode-zen"  // or "openai" / "anthropic"
+"frappe-copilot.provider": "opencode-zen"  // or "openai" / "anthropic" / "claude-code"
 ```
+
+### Multi-Agent Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `frappe-copilot.multiAgent.enabled` | `false` | Route requests to task-specialized sub-agents and self-verify output |
 
 ### OpenCode Zen
 
@@ -133,6 +114,14 @@ All settings are available under `File → Preferences → Settings → Extensio
 | `frappe-copilot.anthropic.endpoint` | `https://api.anthropic.com/v1` | API endpoint URL |
 | `frappe-copilot.anthropic.model` | `claude-3-5-sonnet-latest` | Model to use |
 | `frappe-copilot.anthropic.temperature` | `0.7` | LLM temperature |
+| `frappe-copilot.anthropic.extendedThinking` | `false` | Enable Claude extended thinking |
+
+### Claude Code
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `frappe-copilot.claudeCode.model` | `claude-sonnet-5` | Model to use with official Claude Code SDK |
+| `frappe-copilot.claudeCode.extendedThinking` | `false` | Enable Claude extended thinking for Claude Code |
 
 ## Bench Command Safety
 
