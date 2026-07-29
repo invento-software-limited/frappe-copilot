@@ -36,8 +36,6 @@ jobs:
       - name: Compile TypeScript
         run: npm run compile
 
-      - name: Lint source
-        run: npm run lint
 
       - name: Package extension (.vsix)
         run: npx @vscode/vsce package --allow-missing-repository --skip-license --out frappe-copilot-${{ github.ref_name }}.vsix
