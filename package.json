@@ -2,7 +2,7 @@
   "name": "frappe-copilot",
   "displayName": "Frappe Copilot",
   "description": "AI-powered Frappe/ERPNext development assistant. Integrates with OpenCode Zen for agentic code generation, bench management, and Frappe app scaffolding.",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "publisher": "frappe-copilot",
   "license": "MIT",
   "engines": {

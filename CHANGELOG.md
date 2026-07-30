@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0] - 2026-07-30
+
+### Added
+
+- **No-Code DocType Customization Tools** — New agent tools (`list_customizations`, `write_custom_field`, `write_property_setter`, `write_client_script`, `write_server_script`, `export_customizations`) to inspect and customize standard DocTypes directly on the site database (Custom Fields, Property Setters, Client Scripts, Server Scripts) without touching app code, plus exporting those customizations to versioned JSON files.
+- **Frappe Builder Page Generation** — New `write_builder_page` tool and a dedicated "Design / Web Builder" agent that generates and edits Frappe Builder page designs (landing pages, portal pages) from a prompt.
+- **Configurable Extended Thinking Budget** — New `frappe-copilot.claudeCode.thinkingBudgetTokens` setting to control the token budget for Claude extended thinking.
+
 ## [1.0.0] - 2026-07-29
 
 ### Added
