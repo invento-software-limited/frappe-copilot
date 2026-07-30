@@ -16,6 +16,19 @@ const dynamicImport = new Function('specifier', 'return import(specifier)') as (
 type ClaudeAgentSdk = typeof import('@anthropic-ai/claude-agent-sdk');
 type SDKMessage = Awaited<ReturnType<ClaudeAgentSdk['query']>> extends AsyncGenerator<infer M, void> ? M : never;
 
+/** Per-run resume checkpoint: the Claude Code session that already contains
+ *  everything up through `consumedThrough` non-system messages of that run's
+ *  transcript, so the next call only has to send what's new since then. */
+interface RunCheckpoint {
+  sessionId: string;
+  consumedThrough: number;
+}
+
+/** Upper bound on concurrently-tracked runs — bounds memory for a long-lived
+ *  extension host without needing an explicit end-of-run hook from the caller.
+ *  Far above any realistic number of in-flight/recent agent runs. */
+const MAX_TRACKED_RUNS = 20;
+
 /**
  * Delegates auth and API calling to Anthropic's own Claude Agent SDK — the same
  * library the official Claude Code VS Code extension is built on. It resolves
@@ -23,17 +36,26 @@ type SDKMessage = Awaited<ReturnType<ClaudeAgentSdk['query']>> extends AsyncGene
  * profile from `claude auth login` / the Claude Code "Login with Claude" flow),
  * and handles retries, thinking/effort params, and rate-limit backoff
  * internally — none of that needs to be reimplemented here.
+ *
+ * Each step of this extension's own tool-call loop (ChatPanel.runOneAgentStep)
+ * calls this provider again with the whole growing transcript. Rather than
+ * flattening and resending all of it every time, calls tagged with the same
+ * `options.runId` resume the same Claude Code session and send only what's new
+ * since the last call — see resolveTurn/recordCheckpoint below.
  */
 export class ClaudeAgentSdkProvider implements LLMProvider {
   readonly name = 'Claude Code';
   private model: string = 'claude-sonnet-5';
   private extendedThinking: boolean = false;
+  private thinkingBudgetTokens: number = 10000;
   private sdkPromise: Promise<ClaudeAgentSdk> | undefined;
+  private runs = new Map<string, RunCheckpoint>();
 
   refreshConfig(): void {
     const config = vscode.workspace.getConfiguration('frappe-copilot.claudeCode');
     this.model = config.get<string>('model', 'claude-sonnet-5');
     this.extendedThinking = config.get<boolean>('extendedThinking', false);
+    this.thinkingBudgetTokens = config.get<number>('thinkingBudgetTokens', 10000);
   }
 
   private getSdk(): Promise<ClaudeAgentSdk> {
@@ -64,18 +86,10 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     }
   }
 
-  /** Splits out the system message and flattens the remaining turns into a single
-   *  transcript string. `query()` takes one prompt string per call and this extension
-   *  resends the full history (plus a freshly-rebuilt system prompt) every turn rather
-   *  than using the SDK's session `resume` — so folding prior turns into the prompt
-   *  keeps behavior identical to the direct-API provider instead of tying state to a
-   *  Claude Code session id. */
-  private buildPrompt(messages: Message[]): { system?: string; prompt: string; images: ImageAttachment[] } {
-    const system = messages.find(m => m.role === 'system')?.content;
-    const turns = messages.filter(m => m.role !== 'system');
-
+  /** Folds consecutive same-role messages into single turns. */
+  private mergeTurns(messages: Message[]): { role: 'user' | 'assistant'; content: string }[] {
     const merged: { role: 'user' | 'assistant'; content: string }[] = [];
-    for (const m of turns) {
+    for (const m of messages) {
       const role = m.role === 'assistant' ? 'assistant' : 'user';
       if (merged.length > 0 && merged[merged.length - 1].role === role) {
         merged[merged.length - 1].content += '\n\n' + m.content;
@@ -83,17 +97,16 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
         merged.push({ role, content: m.content });
       }
     }
+    return merged;
+  }
 
-    // The whole history collapses into one prompt, so every image in it has to
-    // ride along on that single turn regardless of which message it came from.
-    const images = messages.flatMap(m => (m.images || []).filter(img => !!img.data));
-
-    if (merged.length === 0) {
-      return { system, prompt: '', images };
-    }
-
-    const last = merged[merged.length - 1];
-    const priorTurns = merged.slice(0, -1);
+  /** `query()` takes one prompt string per call — flattens merged turns into
+   *  the `<prior_conversation>`-wrapped transcript format the SDK expects,
+   *  with the last turn as the actual trailing prompt. */
+  private turnsToPrompt(turns: { role: 'user' | 'assistant'; content: string }[]): string {
+    if (turns.length === 0) return '';
+    const last = turns[turns.length - 1];
+    const priorTurns = turns.slice(0, -1);
 
     let prompt = '';
     if (priorTurns.length > 0) {
@@ -104,8 +117,71 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
       prompt += '</prior_conversation>\n\n';
     }
     prompt += last.content;
+    return prompt;
+  }
 
-    return { system, prompt, images };
+  /** Decides what actually needs to go out over the wire for this call.
+   *
+   *  Without `runId` (or on a run's first call), there's nothing to resume —
+   *  the whole transcript is sent, same as before.
+   *
+   *  With `runId`, this extension's own tool-call loop (ChatPanel.runOneAgentStep)
+   *  re-invokes the provider once per tool round trip within one run, each time
+   *  with `messages` grown by exactly the assistant reply plus tool result(s)
+   *  from the previous step — never mutated or shortened. So once a run has a
+   *  checkpoint, only messages past `consumedThrough` are new. The leading one
+   *  of those is always this run's own last assistant reply (pushed by the
+   *  caller before the next step); the resumed Claude Code session already
+   *  contains it verbatim, since it's what that session generated, so it's
+   *  dropped rather than resent. What's left — the tool result(s) — is the only
+   *  actually-new content, and gets sent with `resume: sessionId` instead of
+   *  the full growing history. This is what turns an O(n^2) multi-step run
+   *  (full transcript resent every step, uncached — see chatStream's
+   *  `persistSession` comment) into O(n) total input tokens for that run. */
+  private resolveTurn(
+    messages: Message[],
+    runId: string | undefined
+  ): { system?: string; prompt: string; images: ImageAttachment[]; resume?: string } {
+    const system = messages.find(m => m.role === 'system')?.content;
+    const nonSystem = messages.filter(m => m.role !== 'system');
+
+    const checkpoint = runId ? this.runs.get(runId) : undefined;
+    let toSend = nonSystem;
+    let resume: string | undefined;
+
+    if (checkpoint && nonSystem.length > checkpoint.consumedThrough) {
+      let newSlice = nonSystem.slice(checkpoint.consumedThrough);
+      if (newSlice.length > 0 && newSlice[0].role === 'assistant') {
+        newSlice = newSlice.slice(1);
+      }
+      if (newSlice.length > 0) {
+        toSend = newSlice;
+        resume = checkpoint.sessionId;
+      }
+      // else: nothing new beyond the already-resumed assistant turn (shouldn't
+      // happen in practice) — fall through and resend the full transcript.
+    }
+
+    const images = toSend.flatMap(m => (m.images || []).filter(img => !!img.data));
+    const prompt = this.turnsToPrompt(this.mergeTurns(toSend));
+
+    return { system, prompt, images, resume };
+  }
+
+  /** Records how much of this run's transcript the resumed/newly-created
+   *  session now covers, so the next call for the same `runId` only sends the
+   *  delta. Only called after a call succeeds — an error leaves the previous
+   *  checkpoint (or none) in place, so a retry naturally resends full context
+   *  instead of resuming a session that may be in a bad state. */
+  private recordCheckpoint(runId: string | undefined, sessionId: string | undefined, messages: Message[]): void {
+    if (!runId || !sessionId) return;
+    const nonSystemCount = messages.filter(m => m.role !== 'system').length;
+    this.runs.set(runId, { sessionId, consumedThrough: nonSystemCount });
+    while (this.runs.size > MAX_TRACKED_RUNS) {
+      const oldestKey = this.runs.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.runs.delete(oldestKey);
+    }
   }
 
   /** `query()` takes either a plain string or a stream of user messages. Images
@@ -179,7 +255,7 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     abortSignal?: AbortSignal
   ): AsyncIterable<ChatResponse> {
     const sdk = await this.getSdk();
-    const { system, prompt, images } = this.buildPrompt(messages);
+    const { system, prompt, images, resume } = this.resolveTurn(messages, options?.runId);
     const modelToUse = options?.model || this.model;
 
     const controller = new AbortController();
@@ -192,22 +268,33 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
       model: modelToUse,
       tools: [],
       strictMcpConfig: true,
-      persistSession: false,
+      // Sessions need to persist to disk so a later call for the same runId
+      // can `resume` this one instead of resending the whole transcript —
+      // see resolveTurn/recordCheckpoint.
+      persistSession: true,
       settingSources: [],
       includePartialMessages: true,
       maxTurns: 1,
       abortController: controller,
     };
+    if (resume) {
+      sdkOptions.resume = resume;
+    }
     if (system) {
       sdkOptions.systemPrompt = system;
     }
     if (this.extendedThinking) {
-      sdkOptions.thinking = { type: 'adaptive' };
+      // `adaptive` only works on Opus-class models (the SDK decides when/how much
+      // to think for those); every model this provider offers, including the
+      // default (claude-sonnet-5), needs the model-agnostic fixed-budget form
+      // instead or the SDK silently emits no thinking_delta events at all.
+      sdkOptions.thinking = { type: 'enabled', budgetTokens: this.thinkingBudgetTokens };
     }
 
     let resultText: string | undefined;
     let sawTextDelta = false;
     let errorMessage: string | undefined;
+    let sessionId: string | undefined = resume;
 
     try {
       const stream = sdk.query({
@@ -218,6 +305,9 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
         if (abortSignal?.aborted) return;
 
         const m = msg as any;
+        if (typeof m.session_id === 'string' && m.session_id) {
+          sessionId = m.session_id;
+        }
         if (m.type === 'stream_event') {
           const event = m.event;
           if (event?.type === 'content_block_delta') {
@@ -251,6 +341,7 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     if (errorMessage) {
       throw new Error(errorMessage);
     }
+    this.recordCheckpoint(options?.runId, sessionId, messages);
     if (resultText) {
       yield { content: resultText, model: modelToUse };
     }

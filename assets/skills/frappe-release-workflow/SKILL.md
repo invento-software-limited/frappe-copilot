@@ -1,6 +1,15 @@
-# Frappe Release Workflow
+---
+name: frappe-release-workflow
+description: >-
+  Version control, branching, changelog, commit-message standards, and
+  release management for Frappe apps. Use this skill any time the user
+  mentions: bumping the app version, SemVer (major/minor/patch), writing a
+  CHANGELOG entry, structuring release branches, commit message conventions,
+  or tagging a release; or says things like "bump the version", "create a
+  release", "tag a new release", or "write a changelog entry".
+---
 
-Version control, branching, changelog, commit standards, and release management for Frappe apps. Load when the task involves bumping versions, creating releases, writing changelogs, structuring branches, or tagging.
+# Frappe Release Workflow
 
 ## 1. App Versioning (SemVer)
 

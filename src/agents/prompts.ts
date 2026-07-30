@@ -146,6 +146,113 @@ Or, for one of its reference files:
 <tool_call name="use_skill">
   <id>frappe-app-dev/references/doctypes.md</id>
 </tool_call>`,
+  list_customizations: `Queries the active site's database for everything already customizing a DocType outside its own app code: Custom Fields, Property Setters, Client Scripts, and DocType-Event Server Scripts. Always call this before write_custom_field, write_property_setter, write_client_script, or write_server_script on a DocType, so a new customization doesn't silently duplicate or conflict with one that's already there.
+Format:
+<tool_call name="list_customizations">
+  <doctype>DocType Name</doctype>
+  <site>optional_site_name</site>
+</tool_call>`,
+  write_custom_field: `Creates or updates a Custom Field on the active site's database — the same effect as adding a field via Customize Form, without touching app code. Safe to call again on a fieldname that already exists; it updates that field in place instead of erroring. Prefer this over write_file/edit_file whenever the target is a standard DocType (Sales Order, Customer, etc.) you don't own the source of, or whenever the user asks to customize/extend an existing DocType rather than build a new one.
+Set 'module' whenever this customization should later be exported to a file with export_customizations — it scopes that export to just this module's rows instead of sweeping up every Custom Field on the doctype from any source. Figure out the right module from the target app (e.g. its modules.txt) rather than guessing; ask the user if it's genuinely unclear.
+Format:
+<tool_call name="write_custom_field">
+  <doctype>DocType Name</doctype>
+  <fieldname>custom_fieldname</fieldname>
+  <fieldtype>Data</fieldtype>
+  <label>optional label</label>
+  <options>optional — Link target doctype, or newline-separated Select options</options>
+  <insert_after>optional — fieldname to place this field after</insert_after>
+  <reqd>optional — 0 or 1</reqd>
+  <read_only>optional — 0 or 1</read_only>
+  <in_list_view>optional — 0 or 1</in_list_view>
+  <depends_on>optional — eval:doc.some_field condition</depends_on>
+  <description>optional</description>
+  <default>optional</default>
+  <module>optional but recommended — the app module this customization belongs to, for later export_customizations</module>
+  <site>optional_site_name</site>
+</tool_call>`,
+  write_property_setter: `Creates or updates a Property Setter on the active site's database — the DB-level override behind changing an existing field or doctype property without touching app code (making a standard field mandatory, hiding a section, changing a label, changing autoname, etc.). Omit fieldname for a doctype-level property.
+Set 'module' for the same reason as write_custom_field's — it lets a later export_customizations call scope its export to this module's own rows.
+Format:
+<tool_call name="write_property_setter">
+  <doctype>DocType Name</doctype>
+  <fieldname>optional — omit for a doctype-level property</fieldname>
+  <property>property name, e.g. reqd, hidden, label, options, default</property>
+  <value>new value</value>
+  <property_type>optional — Data, Check, Int, Select, Text, etc.</property_type>
+  <module>optional but recommended — the app module this customization belongs to, for later export_customizations</module>
+  <site>optional_site_name</site>
+</tool_call>`,
+  export_customizations: `Exports a DocType's Custom Fields and Property Setters from the active site's database into a versioned JSON file under the target app module — <app>/<app>/custom/<doctype>.json — the exact effect of Customize Form's "Export Customizations" button. This is the step that actually gets write_custom_field/write_property_setter's changes into git; without it they only exist in this one site's database. Call it after making those changes, using the same 'module' you set on them.
+Requires the site to have developer_mode enabled (site_config.json) — if this call fails with a developer_mode error, tell the user to run 'bench set-config -g developer_mode 1' (or set it in that site's site_config.json) and retry, rather than treating it as a tool bug.
+Format:
+<tool_call name="export_customizations">
+  <doctype>DocType Name</doctype>
+  <module>App module name, e.g. the one used on write_custom_field/write_property_setter</module>
+  <sync_on_migrate>optional — 0 or 1. Defaults to 1, so the export re-applies automatically on bench migrate on other sites/installs.</sync_on_migrate>
+  <with_permissions>optional — 0 or 1. Defaults to 0.</with_permissions>
+  <apply_module_export_filter>optional — 0 or 1. Defaults to 1, scoping the export to rows whose own module field matches. Set to 0 to export every Custom Field/Property Setter on the doctype regardless of module.</apply_module_export_filter>
+  <site>optional_site_name</site>
+</tool_call>`,
+  write_client_script: `Creates or updates the Client Script for a DocType's given view on the active site's database (Frappe allows at most one per DocType per view — this looks up and updates any existing one rather than creating a duplicate). Use for form/list JS behavior the user wants attached to a standard DocType without an app-code .js file.
+Format:
+<tool_call name="write_client_script">
+  <doctype>DocType Name</doctype>
+  <script>frappe.ui.form.on('DocType Name', { refresh(frm) { ... } });</script>
+  <view>optional — Form or List. Defaults to Form.</view>
+  <enabled>optional — 0 or 1. Defaults to 1.</enabled>
+  <site>optional_site_name</site>
+</tool_call>`,
+  write_server_script: `Creates or updates a Server Script on the active site's database, keyed by its name for update-in-place. Defaults to a 'DocType Event' script (pass doctype + doctype_event); pass api_method instead for an 'API' type script, or event_frequency for a 'Scheduler Event' type.
+**High-risk**: a Server Script runs arbitrary Python against the live site the instant it's enabled — treat it as at least as dangerous as execute_command, not as a routine customization. Many installs also disable Server Script execution entirely (System Settings > enable_server_script); if this call succeeds but nothing seems to run, that's the first thing to check.
+Format:
+<tool_call name="write_server_script">
+  <name>Script Name</name>
+  <script>frappe.throw("example") if doc.some_field else None</script>
+  <script_type>optional — DocType Event, API, Scheduler Event, or Permission Query. Defaults to DocType Event.</script_type>
+  <doctype>required for DocType Event / Permission Query — the reference DocType</doctype>
+  <doctype_event>required for DocType Event, e.g. Before Save, After Insert, On Submit</doctype_event>
+  <api_method>required for API type — the endpoint path</api_method>
+  <event_frequency>required for Scheduler Event, e.g. Daily, Hourly</event_frequency>
+  <enabled>optional — 0 or 1. Defaults to 1.</enabled>
+  <site>optional_site_name</site>
+</tool_call>`,
+  write_builder_page: `Creates or updates a Frappe Builder page's design on the active site's database — the same 'blocks' field Frappe Builder's own AI page generator writes, so the result opens and edits normally in the Builder UI. Upserted by 'page_name' (Builder Page's autoname key), the same update-in-place pattern as write_client_script.
+'blocks' is a compact YAML document describing exactly one root block (a mapping, not a list) using this schema:
+  el: semantic HTML tag (div for the root; section/nav/header/footer/h1-h3/p/span/button/a/img for content)
+  id: string — stable identifier; the root may omit it (defaults to 'root'), but every other block MUST have one
+  name?: string — short descriptive name (shows up in the Builder layer tree)
+  style?: dict — CSS-in-JS camelCase (e.g. backgroundColor, fontFamily). Include interactive states like hover:backgroundColor, active:transform for buttons/links.
+  m_style?: dict — mobile breakpoint overrides
+  t_style?: dict — tablet breakpoint overrides
+  attrs?: dict — HTML attributes (src, alt, href, target)
+  text?: string — text content (always wrap text in a semantic element, never place it directly on a div/section)
+  c?: [el] — nested child blocks
+  classes?: [string] — CSS class names
+Rules: the root block must set display: flex, flexDirection: column, alignItems: center; every direct child section must have width: 100%; create at most ~5 sections; use real external image URLs (web_search if you need one) with alt text; gradients MUST use backgroundImage (never background) and the value MUST be a quoted YAML string, e.g. backgroundImage: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'. When updating a page you created earlier in this conversation, preserve its existing block ids and pass the full tree again — this call always replaces the whole 'blocks' field, it does not patch a single block in place.
+Format:
+<tool_call name="write_builder_page">
+  <page_name>unique-page-key</page_name>
+  <blocks><![CDATA[
+el: div
+id: root
+name: body
+style: {backgroundColor: '#f8f9fa', fontFamily: 'Inter', display: 'flex', flexDirection: 'column', alignItems: 'center'}
+c:
+  - el: section
+    id: hero
+    name: Hero
+    style: {width: '100%', padding: '96px 24px', textAlign: 'center'}
+    c:
+      - el: h1
+        id: hero-title
+        text: 'Welcome'
+  ]]></blocks>
+  <route>optional — URL path, e.g. landing/pricing. Left unset, the controller derives one from page_name.</route>
+  <title>optional — page title / <title> tag</title>
+  <published>optional — 0 or 1. Defaults to unpublished (draft) for a new page, unchanged for an existing one.</published>
+  <site>optional_site_name</site>
+</tool_call>`,
 };
 
 function buildToolsSection(tools: ToolName[]): string {

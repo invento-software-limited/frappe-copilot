@@ -1,6 +1,16 @@
-# Frappe Documentation Standards
+---
+name: frappe-documentation-standards
+description: >-
+  Mandatory documentation requirements for DocTypes, controllers, server
+  scripts, form scripts, and workflows. Use this skill any time the user
+  mentions: documenting or writing docs for a DocType; adding docstrings to a
+  Python controller (PEP-257/Google style); adding JSDoc comments to a form
+  script; writing a docs/ markdown file; or says things like "document this
+  doctype", "write docstrings for this function", "add a JSDoc comment", or
+  "generate documentation for this controller".
+---
 
-Mandatory documentation requirements for DocTypes, controllers, server scripts, form scripts, and workflows. Load when creating or reviewing documentation for Frappe components.
+# Frappe Documentation Standards
 
 ## 1. What Must Be Documented
 

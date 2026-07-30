@@ -5,6 +5,7 @@ import { clientUiAgent } from './definitions/clientUi';
 import { devopsDebugAgent } from './definitions/devopsDebug';
 import { researchAgent } from './definitions/research';
 import { architectureAgent } from './definitions/architecture';
+import { designAgent } from './definitions/design';
 import { generalAgent } from './definitions/general';
 
 /** Specialized agents first, general fallback last — order matters for the
@@ -16,6 +17,7 @@ export const AGENTS: AgentDefinition[] = [
   devopsDebugAgent,
   researchAgent,
   architectureAgent,
+  designAgent,
   generalAgent,
 ];
 

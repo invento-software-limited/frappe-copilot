@@ -1133,7 +1133,7 @@ export class ChatPanel {
     let fullContent = '';
     let fullReasoning = '';
     try {
-      const streamed = await this.stream(messages);
+      const streamed = await this.stream(messages, runId);
       fullContent = streamed.content;
       fullReasoning = streamed.reasoning;
     } catch (e: any) {
@@ -1524,13 +1524,16 @@ export class ChatPanel {
    *  with extended thinking on, the model sometimes emits a whole <tool_call>
    *  block inside its thinking instead of the reply, and that call still has
    *  to be found and executed (see runOneAgentStep). */
-  private async stream(msgs: { role: string; content: string }[]): Promise<{ content: string; reasoning: string }> {
+  private async stream(msgs: { role: string; content: string }[], runId?: string): Promise<{ content: string; reasoning: string }> {
     var full = '', fullReasoning = '', id = '' + Date.now();
     this.panel?.webview.postMessage({ type: 'startStream', messageId: id });
     try {
       const options: any = { maxTokens: 8192 };
       if (this.activeModel) {
         options.model = this.activeModel;
+      }
+      if (runId) {
+        options.runId = runId;
       }
       options.onRetry = (attempt: number, delaySec: number, error: string) => {
         this.say('retryNotice', { attempt, delaySec, error });

@@ -229,7 +229,13 @@
         "frappe-copilot.claudeCode.extendedThinking": {
           "type": "boolean",
           "default": false,
-          "description": "Enable Claude extended (adaptive) thinking. Thinking output is shown in a separate collapsible 'Thought Process' section instead of the main reply."
+          "description": "Enable Claude extended thinking. Thinking output is shown in a separate collapsible 'Thought Process' section instead of the main reply."
+        },
+        "frappe-copilot.claudeCode.thinkingBudgetTokens": {
+          "type": "number",
+          "default": 10000,
+          "description": "Token budget for Claude extended thinking (only used when extendedThinking is enabled).",
+          "minimum": 1024
         },
         "frappe-copilot.multiAgent.enabled": {
           "type": "boolean",
@@ -292,6 +298,7 @@
   },
   "devDependencies": {
     "@types/diff": "^5.2.3",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.3.0"
@@ -301,6 +308,7 @@
     "@types/adm-zip": "^0.5.8",
     "adm-zip": "^0.5.18",
     "diff": "^5.2.2",
+    "js-yaml": "^5.2.2",
     "pdfjs-dist": "^4.0.379"
   }
 }

@@ -3,12 +3,18 @@
 export type ToolName =
   | 'read_file' | 'write_file' | 'edit_file' | 'list_dir' | 'grep_search'
   | 'execute_command' | 'introspect_doctype' | 'ask_clarification'
-  | 'update_todo_list' | 'web_search' | 'web_fetch' | 'use_skill';
+  | 'update_todo_list' | 'web_search' | 'web_fetch' | 'use_skill'
+  | 'list_customizations' | 'write_custom_field' | 'write_property_setter'
+  | 'write_client_script' | 'write_server_script' | 'export_customizations'
+  | 'write_builder_page';
 
 export const ALL_TOOLS: ToolName[] = [
   'read_file', 'write_file', 'edit_file', 'list_dir', 'grep_search',
   'execute_command', 'introspect_doctype', 'ask_clarification',
   'update_todo_list', 'web_search', 'web_fetch', 'use_skill',
+  'list_customizations', 'write_custom_field', 'write_property_setter',
+  'write_client_script', 'write_server_script', 'export_customizations',
+  'write_builder_page',
 ];
 
 /** A task-specialized agent: its own scoped system prompt and tool allowlist,

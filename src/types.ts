@@ -45,6 +45,13 @@ export interface ChatOptions {
   temperature?: number;
   maxTokens?: number;
   stream?: boolean;
+  /** Identifies the agent run this call belongs to (see ChatPanel.runOneAgentStep).
+   *  Every step of one run — and its verification fix-rounds — shares the same
+   *  id. Providers that can resume a server-side session (e.g. the Claude Code
+   *  SDK) use it to key that state instead of resending the whole growing
+   *  transcript on every tool-call round trip. Providers that don't support
+   *  session resume can ignore it. */
+  runId?: string;
   /** Called when a transient error triggers a retry (attempt = 1-based retry count, delaySec = wait before next attempt). */
   onRetry?: (attempt: number, delaySec: number, error: string) => void;
 }

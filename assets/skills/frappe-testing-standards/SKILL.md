@@ -1,6 +1,17 @@
-# Frappe Testing Standards
+---
+name: frappe-testing-standards
+description: >-
+  Mandatory test coverage requirements, naming conventions, and AI-assisted
+  test generation for Frappe apps. Use this skill any time the user mentions:
+  writing tests, unit tests, or a controller test; test coverage for a
+  DocType, controller, server script, or workflow; testing permission/
+  role-based access rules; FrappeTestCase; or says things like "write tests
+  for this doctype", "add test coverage", "generate a controller test", or
+  "test this DocType" — even when they just say "test" or "tests" without
+  "Frappe".
+---
 
-Mandatory test coverage requirements, naming conventions, and AI-assisted test generation for Frappe apps. Load when creating or reviewing tests for DocTypes, controllers, server scripts, workflows, or permissions.
+# Frappe Testing Standards
 
 ## 1. Mandatory Coverage
 

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import * as yaml from 'js-yaml';
 import { exec, spawn } from 'child_process';
 import { BenchEnvironment } from '../types';
 import { ToolName } from './types';
@@ -49,6 +50,20 @@ export class ToolExecutor {
           return await this.executeCommand(args.command);
         case 'introspect_doctype':
           return await this.introspectDocType(args.doctype, args.site);
+        case 'list_customizations':
+          return await this.listCustomizations(args.doctype, args.site);
+        case 'write_custom_field':
+          return await this.writeCustomField(args);
+        case 'write_property_setter':
+          return await this.writePropertySetter(args);
+        case 'write_client_script':
+          return await this.writeClientScript(args);
+        case 'write_server_script':
+          return await this.writeServerScript(args);
+        case 'write_builder_page':
+          return await this.writeBuilderPage(args);
+        case 'export_customizations':
+          return await this.exportCustomizations(args);
         case 'web_search':
           return await this.webSearch(args.query);
         case 'web_fetch':
@@ -329,17 +344,39 @@ export class ToolExecutor {
     return p.replace(/([^a-zA-Z0-9._/-])/g, '\\$1');
   }
 
+  /** Falls back to config.json's defaultSite when the model didn't pass one
+   *  explicitly. Shared by every tool that hits the live site's database. */
+  private resolveSite(site?: string): string | null {
+    if (site) return site;
+    const config = readConfig();
+    return config?.defaultSite || null;
+  }
+
+  /** Runs a one-line Python statement (semicolon-joined, no literal newlines)
+   *  against the site via `bench execute`, the same invocation introspectDocType
+   *  already uses. Free-text arguments (labels, JS/Python script bodies) must
+   *  never be interpolated into `code` directly — a script body containing a
+   *  quote, backslash, or newline would break both the shell's double-quoting
+   *  and the Python source itself. Pass them through b64Json instead and
+   *  decode with `json.loads(base64.b64decode('...').decode('utf-8'))` on the
+   *  Python side, so arbitrary content survives the shell/Python round trip
+   *  as opaque, already-escaped text. */
+  private async runPythonOneLiner(site: string, code: string): Promise<ToolResult> {
+    const command = `bench --site ${site} execute --command "${code.replace(/"/g, '\\"')}"`;
+    return await this.executeCommand(command);
+  }
+
+  /** Base64-encodes a JSON payload for safe embedding in a Python one-liner —
+   *  see runPythonOneLiner. The base64 alphabet has no shell or Python-string
+   *  metacharacters, so this is the one part of the generated command that
+   *  never needs escaping regardless of what the payload contains. */
+  private b64Json(payload: unknown): string {
+    return Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64');
+  }
+
   async introspectDocType(doctype: string, site?: string): Promise<ToolResult> {
     if (!doctype) return { success: false, output: 'Missing doctype parameter' };
-
-    let activeSite = site;
-    if (!activeSite) {
-      const config = readConfig();
-      if (config && config.defaultSite) {
-        activeSite = config.defaultSite;
-      }
-    }
-
+    const activeSite = this.resolveSite(site);
     if (!activeSite) {
       return {
         success: false,
@@ -351,8 +388,273 @@ export class ToolExecutor {
     // Single-line python code using single quotes internally so it has no shell escaping issues when wrapped in double quotes
     const pythonCode = `import frappe, json; m = frappe.get_meta('${safeDocType}'); print(json.dumps({'name': m.name, 'module': m.module, 'issingle': m.issingle, 'istable': m.istable, 'is_submittable': m.is_submittable, 'title_field': m.title_field, 'fields': [{'fieldname': f.fieldname, 'fieldtype': f.fieldtype, 'label': f.label, 'options': f.options, 'reqd': f.reqd, 'in_list_view': f.in_list_view} for f in m.fields], 'links': [{'link_doctype': l.link_doctype, 'link_fieldname': l.link_fieldname, 'group': l.group} for l in getattr(m, 'links', [])], 'states': [{'title': s.title, 'color': s.color} for s in getattr(m, 'states', [])]}, indent=2))`;
 
-    const command = `bench --site ${activeSite} execute --command "${pythonCode.replace(/"/g, '\\"')}"`;
-    return await this.executeCommand(command);
+    return await this.runPythonOneLiner(activeSite, pythonCode);
+  }
+
+  /** Lists everything already customizing a DocType outside its own app code —
+   *  Custom Fields, Property Setters, Client Scripts, and DocType-Event Server
+   *  Scripts. Always call this before write_custom_field/write_property_setter/
+   *  write_client_script/write_server_script so a new customization doesn't
+   *  silently duplicate or conflict with one that already exists. */
+  async listCustomizations(doctype: string, site?: string): Promise<ToolResult> {
+    if (!doctype) return { success: false, output: 'Missing doctype parameter' };
+    const activeSite = this.resolveSite(site);
+    if (!activeSite) {
+      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+    }
+
+    const b64 = this.b64Json(doctype);
+    const code = `import frappe, json, base64; dt = base64.b64decode('${b64}').decode('utf-8'); print(json.dumps({'custom_fields': frappe.get_all('Custom Field', filters={'dt': dt}, fields=['name', 'fieldname', 'fieldtype', 'label', 'insert_after', 'reqd', 'options'], order_by='idx'), 'property_setters': frappe.get_all('Property Setter', filters={'doc_type': dt}, fields=['name', 'field_name', 'property', 'value', 'property_type']), 'client_scripts': frappe.get_all('Client Script', filters={'dt': dt}, fields=['name', 'view', 'enabled']), 'server_scripts': frappe.get_all('Server Script', filters={'reference_doctype': dt}, fields=['name', 'script_type', 'doctype_event', 'enabled'])}, indent=2, default=str))`;
+
+    return await this.runPythonOneLiner(activeSite, code);
+  }
+
+  /** Creates or updates a Custom Field. Frappe's own create_custom_field
+   *  helper (what Customize Form calls) only *creates* — if the fieldname
+   *  already exists on this doctype it silently no-ops instead of updating.
+   *  So this bypasses that helper and does the same upsert pattern used for
+   *  write_client_script/write_server_script instead: look up any existing
+   *  doc, fall back to a fresh one, apply the fields, save() (which inserts
+   *  or updates depending on whether the doc is new — a single expression
+   *  works for both, unlike trying to branch update() vs create() as two
+   *  separate statements inside one semicolon-joined line). Pass `module`
+   *  (the target app module, e.g. one you'd get from list_dir on an app's
+   *  modules.txt) so a later export_customizations call can scope its export
+   *  correctly instead of sweeping up every Custom Field on the doctype
+   *  regardless of who created it. */
+  async writeCustomField(args: Record<string, string>): Promise<ToolResult> {
+    const { doctype, fieldname, fieldtype } = args;
+    if (!doctype || !fieldname || !fieldtype) {
+      return { success: false, output: 'Missing required parameter(s): doctype, fieldname, fieldtype' };
+    }
+    const activeSite = this.resolveSite(args.site);
+    if (!activeSite) {
+      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+    }
+
+    const df: Record<string, unknown> = { fieldname, fieldtype };
+    if (args.label) df.label = args.label;
+    if (args.options) df.options = args.options;
+    if (args.insert_after) df.insert_after = args.insert_after;
+    if (args.reqd !== undefined) df.reqd = args.reqd;
+    if (args.read_only !== undefined) df.read_only = args.read_only;
+    if (args.in_list_view !== undefined) df.in_list_view = args.in_list_view;
+    if (args.depends_on) df.depends_on = args.depends_on;
+    if (args.description) df.description = args.description;
+    if (args.default !== undefined) df.default = args.default;
+    if (args.module) df.module = args.module;
+
+    const b64 = this.b64Json({ doctype, df });
+    const code = `import frappe, json, base64; payload = json.loads(base64.b64decode('${b64}').decode('utf-8')); dt = payload['doctype']; df = payload['df']; existing = frappe.db.get_value('Custom Field', {'dt': dt, 'fieldname': df['fieldname']}, 'name'); doc = frappe.get_doc('Custom Field', existing) if existing else frappe.new_doc('Custom Field'); doc.dt = dt; doc.update(df); doc.save(); frappe.db.commit(); print(json.dumps({'success': True, 'doctype': dt, 'fieldname': df['fieldname'], 'created': not existing}))`;
+
+    return await this.runPythonOneLiner(activeSite, code);
+  }
+
+  /** Creates or updates a Property Setter — the DB-level override behind
+   *  every "change an existing field/doctype property without touching app
+   *  code" customization (e.g. making a standard field mandatory, hiding a
+   *  section, changing a label). Omit fieldname for a doctype-level property
+   *  (e.g. autoname, title_field). Calls frappe.make_property_setter with its
+   *  real signature — a single args dict plus a keyword-only `module`, not
+   *  the older positional (doctype, fieldname, property, value, ...) form.
+   *  Property Setter's own validate() hook deletes any existing row for the
+   *  same (doctype, fieldname, property) before inserting the new one, so
+   *  this is already a safe upsert without needing an explicit exists-check
+   *  the way write_custom_field does. */
+  async writePropertySetter(args: Record<string, string>): Promise<ToolResult> {
+    const { doctype, property, value } = args;
+    if (!doctype || !property || value === undefined) {
+      return { success: false, output: 'Missing required parameter(s): doctype, property, value' };
+    }
+    const activeSite = this.resolveSite(args.site);
+    if (!activeSite) {
+      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+    }
+
+    const payload = {
+      doctype,
+      fieldname: args.fieldname || null,
+      property,
+      value,
+      property_type: args.property_type || undefined,
+      module: args.module || null,
+    };
+    const b64 = this.b64Json(payload);
+    const code = `import frappe, json, base64; payload = json.loads(base64.b64decode('${b64}').decode('utf-8')); frappe.make_property_setter({'doctype': payload['doctype'], 'fieldname': payload['fieldname'], 'doctype_or_field': 'DocType' if not payload['fieldname'] else 'DocField', 'property': payload['property'], 'value': payload['value'], 'property_type': payload.get('property_type')}, module=payload.get('module')); frappe.db.commit(); print(json.dumps({'success': True}))`;
+
+    return await this.runPythonOneLiner(activeSite, code);
+  }
+
+  /** Materializes a DocType's Custom Fields + Property Setters from the site's
+   *  database into a versioned JSON file under the target app module (the same
+   *  effect as Customize Form's "Export Customizations" button) — this is what
+   *  actually gets write_custom_field/write_property_setter's changes into git
+   *  instead of leaving them only in this one site's DB. Requires developer_mode
+   *  on the site (frappe.modules.utils.export_customizations enforces this
+   *  itself); the error message says so plainly if it isn't set. `apply_module_export_filter`
+   *  scopes the export to rows whose own `module` field matches, so pairing this
+   *  with a `module` on write_custom_field/write_property_setter matters — without
+   *  it, every customization on the doctype from any source gets swept into one file. */
+  async exportCustomizations(args: Record<string, string>): Promise<ToolResult> {
+    const { doctype, module } = args;
+    if (!doctype || !module) {
+      return { success: false, output: 'Missing required parameter(s): doctype, module' };
+    }
+    const activeSite = this.resolveSite(args.site);
+    if (!activeSite) {
+      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+    }
+
+    const payload = {
+      doctype,
+      module,
+      sync_on_migrate: args.sync_on_migrate !== undefined ? args.sync_on_migrate : 1,
+      with_permissions: args.with_permissions !== undefined ? args.with_permissions : 0,
+      apply_module_export_filter: args.apply_module_export_filter !== undefined ? args.apply_module_export_filter : 1,
+    };
+    const b64 = this.b64Json(payload);
+    const code = `import frappe, json, base64; from frappe.modules.utils import export_customizations; payload = json.loads(base64.b64decode('${b64}').decode('utf-8')); path = export_customizations(payload['module'], payload['doctype'], sync_on_migrate=payload['sync_on_migrate'], with_permissions=payload['with_permissions'], apply_module_export_filter=payload['apply_module_export_filter']); frappe.db.commit(); print(json.dumps({'success': True, 'path': path}))`;
+
+    return await this.runPythonOneLiner(activeSite, code);
+  }
+
+  /** Creates or updates the (dt, view) Client Script — Frappe allows at most
+   *  one per DocType per view, so this looks up any existing record first
+   *  and updates it in place rather than creating a duplicate. */
+  async writeClientScript(args: Record<string, string>): Promise<ToolResult> {
+    const { doctype, script } = args;
+    if (!doctype || !script) {
+      return { success: false, output: 'Missing required parameter(s): doctype, script' };
+    }
+    const activeSite = this.resolveSite(args.site);
+    if (!activeSite) {
+      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+    }
+
+    const payload = {
+      doctype,
+      script,
+      view: args.view || 'Form',
+      enabled: args.enabled !== undefined ? args.enabled : 1,
+    };
+    const b64 = this.b64Json(payload);
+    const code = `import frappe, json, base64; payload = json.loads(base64.b64decode('${b64}').decode('utf-8')); existing = frappe.db.get_value('Client Script', {'dt': payload['doctype'], 'view': payload['view']}, 'name'); doc = frappe.get_doc('Client Script', existing) if existing else frappe.new_doc('Client Script'); doc.dt = payload['doctype']; doc.view = payload['view']; doc.script = payload['script']; doc.enabled = payload['enabled']; doc.save(); frappe.db.commit(); print(json.dumps({'success': True, 'name': doc.name, 'created': not existing}))`;
+
+    return await this.runPythonOneLiner(activeSite, code);
+  }
+
+  /** Creates or updates a Server Script, keyed by its script_name (Server
+   *  Script autonames from that field, so it doubles as a stable identity for
+   *  the update-in-place lookup). Defaults to a 'DocType Event' script — pass
+   *  doctype + doctype_event for that type, or api_method for an 'API' type
+   *  script. Server Scripts run arbitrary Python against the live site the
+   *  instant they're enabled; the caller must treat this as at least as
+   *  high-risk as execute_command, not merely as a "customization". */
+  async writeServerScript(args: Record<string, string>): Promise<ToolResult> {
+    const { name, script } = args;
+    if (!name || !script) {
+      return { success: false, output: 'Missing required parameter(s): name, script' };
+    }
+    const activeSite = this.resolveSite(args.site);
+    if (!activeSite) {
+      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+    }
+
+    const payload: Record<string, unknown> = {
+      script_name: name,
+      script,
+      script_type: args.script_type || 'DocType Event',
+      enabled: args.enabled !== undefined ? args.enabled : 1,
+    };
+    if (args.doctype) payload.reference_doctype = args.doctype;
+    if (args.doctype_event) payload.doctype_event = args.doctype_event;
+    if (args.api_method) payload.api_method = args.api_method;
+    if (args.event_frequency) payload.event_frequency = args.event_frequency;
+
+    const b64 = this.b64Json(payload);
+    const code = `import frappe, json, base64; payload = json.loads(base64.b64decode('${b64}').decode('utf-8')); existing = frappe.db.get_value('Server Script', {'script_name': payload['script_name']}, 'name'); doc = frappe.get_doc('Server Script', existing) if existing else frappe.new_doc('Server Script'); doc.update(payload); doc.save(); frappe.db.commit(); print(json.dumps({'success': True, 'name': doc.name, 'created': not existing}))`;
+
+    return await this.runPythonOneLiner(activeSite, code);
+  }
+
+  /** Expands one node of Frappe Builder's compact YAML block schema (el/id/name/
+   *  style/attrs/text/c/m_style/t_style/classes) into the full block object its
+   *  frontend expects (element/blockId/blockName/baseStyles/attributes/innerHTML/
+   *  children/mobileStyles/tabletStyles/classes) — mirrors expand_yaml_to_block
+   *  in the Builder app's own ai_page_generator.py so a Builder Page's `blocks`
+   *  field ends up byte-for-byte the same shape whether it was generated there
+   *  or here. */
+  private expandYamlToBlock(node: unknown): unknown {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return node;
+    const n = node as Record<string, any>;
+    const children = Array.isArray(n.c)
+      ? n.c.filter((c: unknown) => c && typeof c === 'object' && !Array.isArray(c)).map((c: unknown) => this.expandYamlToBlock(c))
+      : [];
+    const block: Record<string, any> = {
+      element: n.el || 'div',
+      blockName: n.name || '',
+      baseStyles: (n.style && typeof n.style === 'object') ? n.style : {},
+      attributes: (n.attrs && typeof n.attrs === 'object') ? n.attrs : {},
+      children,
+    };
+    const renames: [string, string][] = [
+      ['id', 'blockId'],
+      ['text', 'innerHTML'],
+      ['m_style', 'mobileStyles'],
+      ['t_style', 'tabletStyles'],
+      ['classes', 'classes'],
+    ];
+    for (const [yamlKey, blockKey] of renames) {
+      if (n[yamlKey] !== undefined) block[blockKey] = n[yamlKey];
+    }
+    return block;
+  }
+
+  /** Creates or updates a Builder Page's `blocks` field (the same field Frappe
+   *  Builder's own AI page generator writes) from the compact YAML block tree
+   *  the model produces, upserted by page_name the same way write_client_script
+   *  upserts by (dt, view). The YAML->block expansion happens here in TS rather
+   *  than in the Python one-liner because runPythonOneLiner can't hold a
+   *  recursive function definition in a single semicolon-joined statement —
+   *  only the already-expanded JSON crosses the shell/Python boundary via
+   *  b64Json, so the Python side is a plain upsert-and-save. */
+  async writeBuilderPage(args: Record<string, string>): Promise<ToolResult> {
+    const { page_name, blocks } = args;
+    if (!page_name || !blocks) {
+      return { success: false, output: 'Missing required parameter(s): page_name, blocks' };
+    }
+    const activeSite = this.resolveSite(args.site);
+    if (!activeSite) {
+      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(blocks);
+    } catch (e: any) {
+      return { success: false, output: `Invalid YAML in 'blocks': ${e.message || String(e)}` };
+    }
+    const root = (Array.isArray(parsed) ? parsed[0] : parsed) as Record<string, any> | undefined;
+    if (!root || typeof root !== 'object') {
+      return {
+        success: false,
+        output: "'blocks' must parse to a YAML mapping describing the root block (el/id/style/c/...), per the Design/Web Builder agent's schema."
+      };
+    }
+    if (!root.id) root.id = 'root';
+    const expandedRoot = this.expandYamlToBlock(root);
+
+    const payload = {
+      page_name,
+      route: args.route || null,
+      title: args.title || null,
+      published: args.published !== undefined ? Number(args.published) : null,
+      blocks_json: JSON.stringify([expandedRoot]),
+    };
+    const b64 = this.b64Json(payload);
+    const code = `import frappe, json, base64; payload = json.loads(base64.b64decode('${b64}').decode('utf-8')); existing = frappe.db.get_value('Builder Page', {'page_name': payload['page_name']}, 'name'); doc = frappe.get_doc('Builder Page', existing) if existing else frappe.new_doc('Builder Page'); doc.page_name = payload['page_name']; doc.route = payload['route'] or doc.route; doc.page_title = payload['title'] or doc.page_title; doc.published = payload['published'] if payload['published'] is not None else doc.published; doc.blocks = payload['blocks_json']; doc.save(); frappe.db.commit(); print(json.dumps({'success': True, 'name': doc.name, 'route': doc.route, 'created': not existing}))`;
+
+    return await this.runPythonOneLiner(activeSite, code);
   }
 
   async webSearch(query: string): Promise<ToolResult> {
