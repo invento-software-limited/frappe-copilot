@@ -503,16 +503,60 @@ async function promptAndExecute(command: BenchCommand): Promise<void> {
     values['site'] = site;
   }
 
-  const placeholders = command.template.match(/\{(\w+)\}/g) || [];
+  const rawPlaceholders = command.template.match(/\{([\w-]+)\}/g) || [];
+  const placeholders = [...new Set(rawPlaceholders)];
   for (const ph of placeholders) {
     const key = ph.slice(1, -1);
-    if (key === 'site') continue;
+    if (key === 'site' && command.requiresSite) continue;
+
+    let prompt = `Value for "${key}"`;
+    let placeHolder = `Enter ${key}`;
+    let defaultValue = '';
+    let isPassword = false;
+
+    if (key === 'site') {
+      prompt = 'New Site Name';
+      placeHolder = 'e.g., site1.localhost';
+    } else if (key === 'app-title') {
+      prompt = 'App Title (human-readable title)';
+      placeHolder = 'e.g., Library Management';
+    } else if (key === 'app-description') {
+      prompt = 'App Description';
+      placeHolder = 'e.g., A library management app for Frappe';
+      defaultValue = 'NA';
+    } else if (key === 'app-publisher') {
+      prompt = 'App Publisher';
+      placeHolder = 'e.g., Faris';
+    } else if (key === 'app-email') {
+      prompt = 'App Email';
+      placeHolder = 'e.g., faris@example.com';
+    } else if (key === 'app-license') {
+      prompt = 'App License (e.g. mit, agpl-3.0, apache-2.0, bsd-3-clause)';
+      placeHolder = 'mit';
+      defaultValue = 'mit';
+    } else if (key === 'github-workflow') {
+      prompt = 'Create GitHub Workflow action for unittests (y/N)';
+      placeHolder = 'y or N';
+      defaultValue = 'y';
+    } else if (key === 'branch-name') {
+      prompt = 'Branch Name (optional)';
+      placeHolder = 'e.g., main';
+      defaultValue = 'develop';
+    } else if (key === 'app-name') {
+      prompt = 'App Name (lowercase, snake_case folder name)';
+      placeHolder = 'e.g., library_management';
+    } else if (key.includes('password')) {
+      isPassword = true;
+    }
 
     const value = await vscode.window.showInputBox({
-      prompt: `Value for "${key}"`,
-      placeHolder: `Enter ${key}`,
+      prompt: prompt,
+      placeHolder: placeHolder,
+      value: defaultValue,
+      password: isPassword,
+      ignoreFocusOut: true,
     });
-    if (!value) return;
+    if (value === undefined) return;
     values[key] = value;
   }
 

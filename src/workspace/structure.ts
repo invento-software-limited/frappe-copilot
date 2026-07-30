@@ -152,10 +152,11 @@ export async function setupBenchWizard(): Promise<BenchEnvironment | null> {
       benchPath = manualPath;
     }
 
+    const wsPath = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || '';
     const env: BenchEnvironment = {
       type: 'host',
       benchPath,
-      benchDir: vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || '',
+      benchDir: wsPath ? findBenchDir(wsPath) : '',
     };
     updateBenchConfig(env);
     return env;
@@ -217,4 +218,25 @@ export function isFrappeWorkspace(): boolean {
     const fullPath = path.join(workspaceRoot, marker);
     return fs.existsSync(fullPath);
   });
+}
+
+/** Walk up the directory tree to find the nearest Frappe bench root folder. */
+export function findBenchDir(startPath: string): string {
+  let current = path.resolve(startPath);
+  while (true) {
+    const hasApps = fs.existsSync(path.join(current, 'apps'));
+    const hasSites = fs.existsSync(path.join(current, 'sites'));
+    const hasProcfile = fs.existsSync(path.join(current, 'Procfile'));
+
+    if (hasApps && hasSites && hasProcfile) {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  return startPath;
 }

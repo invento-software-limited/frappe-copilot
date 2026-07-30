@@ -134,6 +134,11 @@ export class BenchExecutor {
         // Route through docker exec
         const containerId = this.env.containerId;
         const workdir = this.env.benchDir;
+        // If the command contains shell metacharacters like pipe or redirection, run it via sh -c
+        if (rawCommand.includes('|') || rawCommand.includes('&&') || rawCommand.includes('>') || rawCommand.includes('<')) {
+          const escapedCommand = rawCommand.replace(/'/g, "'\\''");
+          return `docker exec -w ${workdir} ${containerId} sh -c '${escapedCommand}'`;
+        }
         return `docker exec -w ${workdir} ${containerId} ${rawCommand}`;
       }
 

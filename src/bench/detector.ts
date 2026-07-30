@@ -1,6 +1,7 @@
 import { execSync } from 'child_process';
 import * as vscode from 'vscode';
 import { BenchEnvironment } from '../types';
+import { findBenchDir } from '../workspace/structure';
 
 /** Options for the bench detector. */
 interface DetectOptions {
@@ -91,7 +92,8 @@ export class BenchDetector {
     if (hostPath) {
       try {
         execSync(`"${hostPath}" --version`, { timeout: 5000, stdio: 'pipe' });
-        const dir = benchDir || process.cwd();
+        const wsPath = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd();
+        const dir = benchDir || findBenchDir(wsPath);
         return {
           type: 'host',
           benchPath: hostPath,
@@ -125,9 +127,11 @@ export class BenchDetector {
           }).toString().trim();
 
           // bench is available — resolve the bench directory
-          benchDir = process.cwd();
+          const wsPath = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd();
+          benchDir = findBenchDir(wsPath);
         } catch {
-          benchDir = process.cwd();
+          const wsPath = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath || process.cwd();
+          benchDir = findBenchDir(wsPath);
         }
 
         return {
