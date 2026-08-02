@@ -20,3 +20,26 @@ assets/docs/**
 **/*.ts
 **/*.map
 **/*.tsbuildinfo
+
+# Exclude unnecessary files in node_modules to reduce file count
+node_modules/**/*.map
+node_modules/**/*.ts
+node_modules/**/test/**
+node_modules/**/tests/**
+node_modules/**/doc/**
+node_modules/**/docs/**
+node_modules/**/example/**
+node_modules/**/examples/**
+node_modules/**/README*
+node_modules/**/readme*
+node_modules/**/LICENSE*
+node_modules/**/license*
+node_modules/**/CHANGELOG*
+node_modules/**/changelog*
+
+# Exclude unused builds of pdfjs-dist
+node_modules/pdfjs-dist/build/**
+node_modules/pdfjs-dist/web/**
+node_modules/pdfjs-dist/types/**
+node_modules/pdfjs-dist/lib/**
+node_modules/pdfjs-dist/es5/**

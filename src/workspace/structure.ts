@@ -163,35 +163,46 @@ export async function setupBenchWizard(): Promise<BenchEnvironment | null> {
   }
 
   if (choice.value === 'docker') {
-    // Try to auto-detect frappe containers
-    let containerId = '';
-    let containerName = '';
-    try {
-      const { execSync } = require('child_process');
-      const output = execSync(
-        `docker ps --filter "name=frappe" --format "{{.ID}}\t{{.Names}}" --latest`,
-        { timeout: 5000, stdio: 'pipe' }
-      ).toString().trim();
-      if (output) {
-        const parts = output.split('\t');
-        containerId = parts[0];
-        containerName = parts[1] || containerId;
-      }
-    } catch {
-      // Docker not running or no containers
+    const containers = getActiveDockerContainers();
+
+    const items = containers.map((c) => ({
+      label: `$(container) ${c.name}`,
+      description: `(${c.id.slice(0, 12)})`,
+      value: c.id,
+      name: c.name,
+    }));
+
+    items.push({
+      label: '$(pencil) Enter container name or ID manually...',
+      description: 'Input a custom container name or ID',
+      value: 'manual',
+      name: '',
+    });
+
+    const selected = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Select the Docker container running Frappe Bench',
+      ignoreFocusOut: true,
+    });
+
+    if (!selected) {
+      return null;
     }
 
-    if (containerId) {
-      vscode.window.showInformationMessage(`Frappe container detected: ${containerName} (${containerId.slice(0, 12)})`);
-    } else {
+    let containerId = '';
+    let containerName = '';
+
+    if (selected.value === 'manual') {
       const manualId = await vscode.window.showInputBox({
         prompt: 'Enter Docker container name or ID',
-        placeHolder: 'e.g., frappe-worker-1 or abc123def456',
+        placeHolder: 'e.g., my-frappe-container or abc123def456',
         ignoreFocusOut: true,
       });
       if (!manualId) return null;
-      containerId = manualId;
-      containerName = manualId;
+      containerId = manualId.trim();
+      containerName = manualId.trim();
+    } else {
+      containerId = selected.value;
+      containerName = selected.name;
     }
 
     const env: BenchEnvironment = {
@@ -239,4 +250,27 @@ export function findBenchDir(startPath: string): string {
     current = parent;
   }
   return startPath;
+}
+
+/** Get a list of all active Docker containers. */
+function getActiveDockerContainers(): { id: string; name: string }[] {
+  try {
+    const { execSync } = require('child_process');
+    const output = execSync(
+      'docker ps --format "{{.ID}}\\t{{.Names}}"',
+      { timeout: 5000, stdio: 'pipe' }
+    ).toString().trim();
+
+    if (!output) return [];
+
+    return output.split('\n').map((line: string) => {
+      const parts = line.split('\t');
+      return {
+        id: parts[0],
+        name: parts[1] || parts[0],
+      };
+    });
+  } catch {
+    return [];
+  }
 }

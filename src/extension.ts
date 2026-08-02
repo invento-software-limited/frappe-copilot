@@ -4,12 +4,18 @@ import { DynamicProvider } from './providers/dynamic';
 import { BenchDetector } from './bench/detector';
 import { BenchExecutor } from './bench/executor';
 import { BENCH_COMMANDS, resolveCommand, getCommandById } from './bench/commands';
-import { initializeWorkspaceStructure, getFrappeCopilotPath, readConfig, updateBenchConfig, isBenchConfigured, setupBenchWizard } from './workspace/structure';
+import { initializeWorkspaceStructure, getFrappeCopilotPath, readConfig, updateBenchConfig, isBenchConfigured, setupBenchWizard, writeConfig } from './workspace/structure';
 import { SessionManager } from './session/manager';
 import { ChatPanel } from './chat/panel';
 import { BenchEnvironment, BenchCommand } from './types';
 import { SkillsStore } from './agents/skillsStore';
 import { SkillsProvider } from './agents/skillsTreeProvider';
+import { BenchCommandsProvider } from './bench/benchCommandsProvider';
+import { DatabaseProvider } from './bench/databaseProvider';
+import { PlaygroundProvider } from './bench/playgroundProvider';
+
+// ─── Global log channel ───────────────────────────────────────────────────────
+export const logChannel = vscode.window.createOutputChannel('Frappe Copilot');
 
 // ─── Global state ─────────────────────────────────────────────────────────────
 
@@ -19,6 +25,9 @@ let benchExecutor: BenchExecutor | null = null;
 let sessionManager: SessionManager | null = null;
 let skillsStore: SkillsStore | null = null;
 let skillsProvider: SkillsProvider | null = null;
+let benchCommandsProvider: BenchCommandsProvider | null = null;
+let databaseProvider: DatabaseProvider | null = null;
+let playgroundProvider: PlaygroundProvider | null = null;
 let chatPanel: ChatPanel | null = null;
 let benchEnv: BenchEnvironment | null = null;
 let statusBarItem: vscode.StatusBarItem;
@@ -86,6 +95,22 @@ export function activate(context: vscode.ExtensionContext) {
       skillsProvider
     );
   }
+  benchCommandsProvider = new BenchCommandsProvider();
+  vscode.window.registerTreeDataProvider(
+    'frappe-copilot.benchCommands',
+    benchCommandsProvider
+  );
+  databaseProvider = new DatabaseProvider(() => benchExecutor);
+  vscode.window.registerTreeDataProvider(
+    'frappe-copilot.database',
+    databaseProvider
+  );
+
+  playgroundProvider = new PlaygroundProvider();
+  vscode.window.registerTreeDataProvider(
+    'frappe-copilot.playground',
+    playgroundProvider
+  );
 
   // Listen for config changes
   context.subscriptions.push(
@@ -195,6 +220,18 @@ function registerCommands(context: vscode.ExtensionContext) {
       await importSkillFromFile();
     })
   );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.openConsole', () => {
+      openInteractiveConsole('console');
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.openMariaDB', () => {
+      openInteractiveConsole('mariadb');
+    })
+  );
 }
 
 // ─── Initial Setup Wizard ────────────────────────────────────────────────────
@@ -255,6 +292,7 @@ async function runBenchSetupWizard(): Promise<void> {
     if (chatPanel) {
       chatPanel.setBenchEnv(env);
     }
+    databaseProvider?.refresh();
   }
 }
 
@@ -326,6 +364,7 @@ async function detectBenchEnvironment(force: boolean = false): Promise<void> {
     if (env.type !== 'not-found') {
       benchExecutor = new BenchExecutor(env);
       updateBenchConfig(env);
+      databaseProvider?.refresh();
     }
 
     switch (env.type) {
@@ -494,12 +533,59 @@ async function promptAndExecute(command: BenchCommand): Promise<void> {
   if (command.requiresSite) {
     const config = readConfig();
     const defaultSite = config?.defaultSite || '';
-    const site = await vscode.window.showInputBox({
-      prompt: `Site name for "${command.name}"`,
-      placeHolder: 'e.g., site1.localhost',
-      value: defaultSite,
-    });
-    if (!site) return;
+    let site = '';
+
+    let sites: string[] = [];
+    try {
+      sites = await benchExecutor.getSites();
+    } catch {
+      // ignore
+    }
+
+    if (sites.length > 0) {
+      const items = sites.map((s) => ({
+        label: `$(globe) ${s}`,
+        value: s,
+      }));
+      items.push({
+        label: '$(pencil) Enter site name manually...',
+        value: 'manual',
+      });
+
+      const selected = await vscode.window.showQuickPick(items, {
+        placeHolder: `Select site for "${command.name}"`,
+        ignoreFocusOut: true,
+      });
+
+      if (!selected) return;
+
+      if (selected.value === 'manual') {
+        const manualSite = await vscode.window.showInputBox({
+          prompt: `Site name for "${command.name}"`,
+          placeHolder: 'e.g., site1.localhost',
+          value: defaultSite,
+          ignoreFocusOut: true,
+        });
+        if (!manualSite) return;
+        site = manualSite.trim();
+      } else {
+        site = selected.value;
+      }
+    } else {
+      const manualSite = await vscode.window.showInputBox({
+        prompt: `Site name for "${command.name}"`,
+        placeHolder: 'e.g., site1.localhost',
+        value: defaultSite,
+        ignoreFocusOut: true,
+      });
+      if (!manualSite) return;
+      site = manualSite.trim();
+    }
+
+    if (site && config) {
+      config.defaultSite = site;
+      writeConfig(config);
+    }
     values['site'] = site;
   }
 
@@ -672,4 +758,36 @@ function updateStatusBar(status: string): void {
       statusBarItem.text = '$(circuit-board) Frappe Copilot';
       break;
   }
+}
+
+/** Prompt the user to select a site and open an interactive console (bench console or bench mariadb) in a terminal. */
+async function openInteractiveConsole(type: 'console' | 'mariadb'): Promise<void> {
+  if (!benchExecutor) {
+    vscode.window.showErrorMessage('Frappe Copilot: Bench environment not configured.');
+    return;
+  }
+
+  let sites: string[] = [];
+  try {
+    sites = await benchExecutor.getSites();
+  } catch (err: any) {
+    vscode.window.showErrorMessage(`Error loading sites: ${err.message}`);
+    return;
+  }
+
+  if (sites.length === 0) {
+    vscode.window.showErrorMessage('No sites found in this bench.');
+    return;
+  }
+
+  const selectedSite = await vscode.window.showQuickPick(sites, {
+    placeHolder: `Select site to open ${type === 'console' ? 'Bench Console' : 'MariaDB Console'}`,
+    ignoreFocusOut: true,
+  });
+
+  if (!selectedSite) return;
+
+  const rawCmd = type === 'console' ? `bench --site ${selectedSite} console` : `bench --site ${selectedSite} mariadb`;
+  const termName = type === 'console' ? `Bench Console (${selectedSite})` : `MariaDB Console (${selectedSite})`;
+  benchExecutor.runInteractive(rawCmd, termName);
 }

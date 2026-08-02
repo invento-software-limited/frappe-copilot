@@ -2,7 +2,11 @@
   "name": "frappe-copilot",
   "displayName": "Frappe Copilot",
   "description": "AI-powered Frappe/ERPNext development assistant. Integrates with OpenCode Zen for agentic code generation, bench management, and Frappe app scaffolding.",
-  "version": "1.1.0",
+  "version": "1.2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/invento-software-limited/frappe-copilot.git"
+  },
   "publisher": "frappe-copilot",
   "license": "MIT",
   "engines": {
@@ -85,6 +89,16 @@
           "type": "tree",
           "id": "frappe-copilot.benchCommands",
           "name": "Bench Commands"
+        },
+        {
+          "type": "tree",
+          "id": "frappe-copilot.database",
+          "name": "Database"
+        },
+        {
+          "type": "tree",
+          "id": "frappe-copilot.playground",
+          "name": "Playground"
         }
       ]
     },
@@ -297,6 +311,7 @@
     "lint": "eslint src --ext ts"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
     "@types/diff": "^5.2.3",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.0",
@@ -305,7 +320,6 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.208",
-    "@types/adm-zip": "^0.5.8",
     "adm-zip": "^0.5.18",
     "diff": "^5.2.2",
     "js-yaml": "^5.2.2",
