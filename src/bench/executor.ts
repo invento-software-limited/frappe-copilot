@@ -60,6 +60,87 @@ export class BenchExecutor {
     }
   }
 
+  /** Retrieve a list of sites in the bench. */
+  async getSites(): Promise<string[]> {
+    const isFile = (s: string) =>
+      s.endsWith('.json') ||
+      s.endsWith('.txt') ||
+      s.endsWith('.conf') ||
+      s.endsWith('.py') ||
+      s.endsWith('.md') ||
+      s.endsWith('.sh') ||
+      s.endsWith('.yml') ||
+      s.endsWith('.yaml');
+
+    try {
+      const fullCommand = this.buildCommand('bench list-sites');
+      const stdout = execSync(fullCommand, { timeout: 10000, stdio: 'pipe', windowsHide: true }).toString();
+      const sites = stdout
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && s !== 'assets' && !s.includes('warn') && !s.includes('error') && !s.includes('warning') && !s.includes('Error') && !isFile(s));
+      if (sites.length > 0) {
+        return sites;
+      }
+    } catch {
+      // Fall through to manual check
+    }
+
+    // Fallback: Check directories under sites/
+    try {
+      const ignored = ['assets', 'common_site_config.json', 'apps.txt', 'languages.txt', 'patches.txt', 'nginx.conf'];
+      if (this.env.type === 'host' && this.env.benchDir) {
+        const fs = require('fs');
+        const path = require('path');
+        const sitesPath = path.join(this.env.benchDir, 'sites');
+        if (fs.existsSync(sitesPath)) {
+          return fs.readdirSync(sitesPath).filter((f: string) => {
+            try {
+              const stat = fs.statSync(path.join(sitesPath, f));
+              return stat.isDirectory() && !ignored.includes(f) && !isFile(f);
+            } catch {
+              return false;
+            }
+          });
+        }
+      } else if (this.env.type === 'docker' && this.env.containerId && this.env.benchDir) {
+        const sitesPath = `${this.env.benchDir}/sites`;
+        const rawCmd = `docker exec ${this.env.containerId} find ${sitesPath} -maxdepth 1 -type d`;
+        const output = execSync(rawCmd, { timeout: 5000, stdio: 'pipe' }).toString();
+        return output
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0)
+          .map((s) => s.split('/').pop() || '')
+          .filter((s) => s.length > 0 && s !== 'sites' && s !== 'assets' && !ignored.includes(s) && !isFile(s));
+      }
+    } catch {
+      // ignore
+    }
+
+    return [];
+  }
+
+  /** Execute a command silently in the bench environment and return stdout. */
+  async executeSilent(rawCommand: string): Promise<string> {
+    const fullCommand = this.buildCommand(rawCommand);
+    try {
+      const options: ExecSyncOptions = {
+        timeout: 15000,
+        maxBuffer: 5 * 1024 * 1024,
+        stdio: 'pipe',
+        windowsHide: true,
+      };
+      return execSync(fullCommand, options).toString().trim();
+    } catch (error: any) {
+      const msg = error.stderr?.toString() || error.message || 'Execution failed';
+      const newErr = new Error(msg) as any;
+      newErr.stdout = error.stdout?.toString();
+      newErr.stderr = error.stderr?.toString();
+      throw newErr;
+    }
+  }
+
   /** Execute a command and stream output via callback. */
   async executeWithOutput(
     command: ResolvedCommand,
@@ -116,6 +197,33 @@ export class BenchExecutor {
         });
       });
     });
+  }
+
+  /** Get the interactive form of a command (allocating TTY for docker). */
+  getInteractiveCommand(rawCommand: string): string {
+    switch (this.env.type) {
+      case 'host': {
+        if (this.env.benchDir) {
+          return `cd ${this.escapePath(this.env.benchDir)} && ${rawCommand}`;
+        }
+        return rawCommand;
+      }
+      case 'docker': {
+        const containerId = this.env.containerId;
+        const workdir = this.env.benchDir;
+        return `docker exec -it -w ${workdir} ${containerId} ${rawCommand}`;
+      }
+      default:
+        return rawCommand;
+    }
+  }
+
+  /** Run a command interactively in a dedicated VS Code terminal. */
+  runInteractive(rawCommand: string, name: string): void {
+    const fullCommand = this.getInteractiveCommand(rawCommand);
+    const terminal = vscode.window.createTerminal({ name });
+    terminal.show();
+    terminal.sendText(fullCommand);
   }
 
   /** Prefix/transform the command based on the environment. */

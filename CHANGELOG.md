@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0] - 2026-08-02
+
+### Added
+
+- **Bench Playground (Interactive REPLs)** — Added a Playground view containing options to open `bench console` (Python shell) and `bench mariadb` (SQL console) in integrated VS Code terminals, fully supporting TTY forwarding for Docker environments.
+- **Persistent Database Explorer** — Built a new Database Tree View that dynamically displays all tables and columns (with their SQL types) for any site in the bench via native and secure Frappe DB CLI abstraction.
+- **Categorized Bench Commands View** — Added a sidebar view with grouped bench commands and a one-click setup action to configure or update the bench environment.
+- **Interactive Container & Site Selectors** — Replaced automated docker container detection with a dynamic QuickPick selector, and added drop-down site-selection menus for site-dependent commands.
+
+### Changed
+
+- **Refined Site Detection** — Excluded configuration/text files (like `apps.txt`, `currentsite.txt`, `.json`, etc.) from showing up as sites in selection lists.
+
 ## [1.1.0] - 2026-07-30
 
 ### Added
