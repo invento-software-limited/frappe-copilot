@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.1] - 2026-08-02
+
+### Fixed
+
+- **`Introspect DocType` always failing** — `bench execute` does not have a `--command` flag; it only accepts a dotted Python module path as its positional argument. The `runPythonOneLiner` helper was incorrectly generating `bench execute --command "..."` which bench's Click CLI parsed as an unknown command and threw `No such command: <garbled>`. Fixed by writing the Python code to a timestamped temp file (`apps/_fc_tmp_<ts>.py`) that exports a proper `execute()` function (the convention `bench execute` calls) and deleting it immediately after. Docker environments write the file via `base64 | docker exec` to bypass all shell-quoting issues.
+
 ## [1.2.0] - 2026-08-02
 
 ### Added
