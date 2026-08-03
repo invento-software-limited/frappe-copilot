@@ -44,7 +44,7 @@ export class DatabaseProvider implements vscode.TreeDataProvider<vscode.TreeItem
 
     if (element instanceof DatabaseSiteItem) {
       // Site level: list of tables in the site database
-      const site = element.site;
+      const site = element.site.replace(/^\*\s*/, '').trim();
       try {
         const pythonCmd = `bench --site ${site} execute frappe.db.get_tables`;
         const stdout = await executor.executeSilent(pythonCmd);
@@ -74,7 +74,8 @@ export class DatabaseProvider implements vscode.TreeDataProvider<vscode.TreeItem
 
     if (element instanceof DatabaseTableItem) {
       // Table level: list of columns (fields + database types) inside the table
-      const { site, tableName } = element;
+      const site = element.site.replace(/^\*\s*/, '').trim();
+      const tableName = element.tableName;
       try {
         // Query column details natively using frappe.db.get_table_columns_description
         const pythonCmd = `bench --site ${site} execute frappe.db.get_table_columns_description --args "['${tableName}']"`;

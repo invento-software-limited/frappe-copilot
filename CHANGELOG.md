@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.2] - 2026-08-03
+
+### Fixed
+
+- **Database Tree View Site Name Sanitization** — Fixed errors when inspecting database tables/columns for active sites marked with an asterisk (`* site.name`) or when header strings (`Available sites:`) are returned by `bench list-sites`. Cleaned site names automatically before executing site-dependent database commands.
+
 ## [1.2.1] - 2026-08-02
 
 ### Fixed

@@ -8,13 +8,16 @@ live bench command execution, and a visual workflow graph.
 
 ## Features
 
+- **💻 Bench Playground (Interactive REPLs)** — Instant one-click access to open `bench console` (Python shell) and `bench mariadb` (SQL console) in integrated VS Code terminals with full Docker TTY support.
+- **🗄️ Database Explorer Tree View** — Dedicated sidebar view to inspect sites, browse database tables, and view field column names & SQL data types natively.
+- **⚡ Categorized Bench Commands Tree View** — Interactive sidebar to quickly browse 100+ categorized bench CLI commands and execute them on your site/container with safety confirmation gates for destructive actions.
+- **🎨 No-Code DocType & Page Customization Tools** — Agent tools (`write_custom_field`, `write_property_setter`, `write_client_script`, `write_server_script`, `export_customizations`, `write_builder_page`) to inspect and edit standard DocTypes and generate Frappe Builder pages without modifying app code.
 - **🤖 Multi-Agent Orchestration & Routing** — Automatically route complex requests to task-specific sub-agents (DocType/Schema Builder, Server-side Logic, Client UI, Bench/DevOps, Research, Architecture) with persistent transcripts and self-verification (e.g. running migrations and tests with self-correction loops).
 - **🔑 Anthropic OAuth & Claude Code Session** — Direct OAuth login flow for Anthropic/Claude with automatic token refreshing, secure credential storage, and rate-limit handling.
 - **🖼️ Multimodal OpenAI Message Support** — Send and render rich multimodal messages (including images and file attachments) in OpenAI-compatible API providers.
 - **📚 Custom Developer Skills** — Create, import, and execute custom developer skills (YAML/Markdown-based checklists and instructions like `frappe-app-dev`) to standardize workflows.
 - **💬 AI Chat with Streaming** — Conversational Frappe/ERPNext assistant with real-time streaming responses.
 - **🔍 Auto Bench Detection** — Automatically detects your bench environment (host shell or Docker container).
-- **⚡ 100+ Bench Commands** — Pre-configured `bench` CLI commands across 17 categories with safety confirmation gates for destructive operations.
 - **🔄 Multi-Provider** — Switch between OpenCode Zen, OpenAI, Anthropic, and Claude Code on the fly.
 - **📂 Session Management** — Multiple persistent chat sessions with message history (JSONL) and evolving context files.
 - **🤖 Agentic Tool Loop** — Autonomous multi-step execution: the AI can read files, write/edit code, run commands, search the web, inspect DocTypes, and more — all with user approval for high-risk actions.
@@ -26,7 +29,7 @@ live bench command execution, and a visual workflow graph.
 - **✅ Interactive Todo List** — The AI can create, update, and track a todo list that renders in the chat UI.
 - **🔧 In-Chat Settings** — Configure API key, endpoint, provider, and model directly inside the chat panel.
 - **🛡️ Tool Approval System** — `write_file`, `edit_file`, and `execute_command` always prompt for user confirmation before execution.
-- **🔁 Auto-Healing** — After writing or editing code files, the agent runs syntax validation (`py_compile` for Python, `node -c` for JavaScript) and reports warnings.
+- **🔁 Auto-Healing** — After writing or editing code files, the agent automatically validates and fixes syntax errors.
 - **🧭 Schema Introspection** — Automatically queries your active Frappe site to discover installed apps and DocTypes.
 
 ## Getting Started
@@ -35,7 +38,7 @@ live bench command execution, and a visual workflow graph.
 
 To install the extension from the compiled VSIX package:
 
-1. Download the latest `frappe-copilot-1.0.0.vsix` asset.
+1. Download the latest `frappe-copilot-1.2.2.vsix` asset.
 2. In VS Code, press **Ctrl+Shift+P** (or **Cmd+Shift+P**) to open the Command Palette.
 3. Run the command **Extensions: Install from VSIX...**.
 4. Select the downloaded `.vsix` file to install it.
