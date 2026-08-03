@@ -545,10 +545,13 @@ async function promptAndExecute(command: BenchCommand): Promise<void> {
     }
 
     if (sites.length > 0) {
-      const items = sites.map((s) => ({
-        label: `$(globe) ${s}`,
-        value: s,
-      }));
+      const items = sites.map((s) => {
+        const clean = s.replace(/^\*+\s*/, '').trim();
+        return {
+          label: `$(globe) ${clean}`,
+          value: clean,
+        };
+      });
       items.push({
         label: '$(pencil) Enter site name manually...',
         value: 'manual',
@@ -565,23 +568,23 @@ async function promptAndExecute(command: BenchCommand): Promise<void> {
         const manualSite = await vscode.window.showInputBox({
           prompt: `Site name for "${command.name}"`,
           placeHolder: 'e.g., site1.localhost',
-          value: defaultSite,
+          value: defaultSite.replace(/^\*+\s*/, '').trim(),
           ignoreFocusOut: true,
         });
         if (!manualSite) return;
-        site = manualSite.trim();
+        site = manualSite.replace(/^\*+\s*/, '').trim();
       } else {
-        site = selected.value;
+        site = selected.value.replace(/^\*+\s*/, '').trim();
       }
     } else {
       const manualSite = await vscode.window.showInputBox({
         prompt: `Site name for "${command.name}"`,
         placeHolder: 'e.g., site1.localhost',
-        value: defaultSite,
+        value: defaultSite.replace(/^\*+\s*/, '').trim(),
         ignoreFocusOut: true,
       });
       if (!manualSite) return;
-      site = manualSite.trim();
+      site = manualSite.replace(/^\*+\s*/, '').trim();
     }
 
     if (site && config) {
@@ -789,7 +792,8 @@ async function openInteractiveConsole(type: 'console' | 'mariadb'): Promise<void
 
   if (!selectedSite) return;
 
-  const rawCmd = type === 'console' ? `bench --site ${selectedSite} console` : `bench --site ${selectedSite} mariadb`;
-  const termName = type === 'console' ? `Bench Console (${selectedSite})` : `MariaDB Console (${selectedSite})`;
+  const cleanSite = selectedSite.replace(/^\*+\s*/, '').trim();
+  const rawCmd = type === 'console' ? `bench --site ${cleanSite} console` : `bench --site ${cleanSite} mariadb`;
+  const termName = type === 'console' ? `Bench Console (${cleanSite})` : `MariaDB Console (${cleanSite})`;
   benchExecutor.runInteractive(rawCmd, termName);
 }

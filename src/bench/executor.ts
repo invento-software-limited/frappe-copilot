@@ -77,10 +77,10 @@ export class BenchExecutor {
       const stdout = execSync(fullCommand, { timeout: 10000, stdio: 'pipe', windowsHide: true }).toString();
       const sites = stdout
         .split(/\r?\n/)
-        .map((s) => s.trim())
+        .map((s) => s.trim().replace(/^\*+\s*/, ''))
         .filter((s) => s.length > 0 && s !== 'assets' && !s.includes('warn') && !s.includes('error') && !s.includes('warning') && !s.includes('Error') && !isFile(s));
       if (sites.length > 0) {
-        return sites;
+        return Array.from(new Set(sites));
       }
     } catch {
       // Fall through to manual check
@@ -94,7 +94,7 @@ export class BenchExecutor {
         const path = require('path');
         const sitesPath = path.join(this.env.benchDir, 'sites');
         if (fs.existsSync(sitesPath)) {
-          return fs.readdirSync(sitesPath).filter((f: string) => {
+          const rawSites = fs.readdirSync(sitesPath).filter((f: string) => {
             try {
               const stat = fs.statSync(path.join(sitesPath, f));
               return stat.isDirectory() && !ignored.includes(f) && !isFile(f);
@@ -102,6 +102,7 @@ export class BenchExecutor {
               return false;
             }
           });
+          return rawSites.map((s: string) => s.replace(/^\*+\s*/, '').trim());
         }
       } else if (this.env.type === 'docker' && this.env.containerId && this.env.benchDir) {
         const sitesPath = `${this.env.benchDir}/sites`;
@@ -112,6 +113,7 @@ export class BenchExecutor {
           .map((s) => s.trim())
           .filter((s) => s.length > 0)
           .map((s) => s.split('/').pop() || '')
+          .map((s) => s.replace(/^\*+\s*/, '').trim())
           .filter((s) => s.length > 0 && s !== 'sites' && s !== 'assets' && !ignored.includes(s) && !isFile(s));
       }
     } catch {

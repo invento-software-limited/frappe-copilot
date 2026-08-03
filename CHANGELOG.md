@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.2] - 2026-08-03
+
+### Fixed
+
+- **Active Site Asterisk (`*`) Sanitization in Site Quick Pick & Console Tools** — Automatically sanitized active site markers (`*`) returned by `bench list-sites` when listing available sites for commands and interactive console triggers, preventing shell execution syntax errors (`bench --site * site.name`).
+
 ## [1.3.1] - 2026-08-03
 
 ### Changed
