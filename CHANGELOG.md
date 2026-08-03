@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.0] - 2026-08-03
+
+### Added
+
+- **Responsive Webview Grid Views** — Converted `Bench Commands`, `Skills`, and `Database Explorer` sidebar views into modern, responsive Webview Grid UIs featuring interactive cards, top action bars, badges, and real-time search filtering.
+- **Top Frequently Used Commands Grid** — Highlighted top bench commands (`clear-cache`, `migrate`, `restart`, `get-app`, `install-app`) at the top of the Bench Commands Webview grid with glowing cards and quick execution triggers.
+- **Skills Grid Explorer** — Added a visual card grid for built-in and workspace skills with search, source badges (`Built-in` vs `Custom`), and one-click file opening.
+- **Interactive Database Explorer Webview** — Integrated site selector, instant table search, expandable schema inspector cards with datatype badges (`VARCHAR`, `INT`, `DATETIME`, etc.), and quick-launch terminal buttons for `MariaDB` and `Python` consoles.
+
 ## [1.2.2] - 2026-08-03
 
 ### Fixed

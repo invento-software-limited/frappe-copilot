@@ -2,7 +2,7 @@
   "name": "frappe-copilot",
   "displayName": "Frappe Copilot",
   "description": "AI-powered Frappe/ERPNext development assistant. Integrates with OpenCode Zen for agentic code generation, bench management, and Frappe app scaffolding.",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/invento-software-limited/frappe-copilot.git"
@@ -81,17 +81,17 @@
           "name": "Sessions"
         },
         {
-          "type": "tree",
+          "type": "webview",
           "id": "frappe-copilot.skills",
           "name": "Skills"
         },
         {
-          "type": "tree",
+          "type": "webview",
           "id": "frappe-copilot.benchCommands",
           "name": "Bench Commands"
         },
         {
-          "type": "tree",
+          "type": "webview",
           "id": "frappe-copilot.database",
           "name": "Database"
         },

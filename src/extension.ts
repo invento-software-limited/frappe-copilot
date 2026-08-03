@@ -9,9 +9,9 @@ import { SessionManager } from './session/manager';
 import { ChatPanel } from './chat/panel';
 import { BenchEnvironment, BenchCommand } from './types';
 import { SkillsStore } from './agents/skillsStore';
-import { SkillsProvider } from './agents/skillsTreeProvider';
-import { BenchCommandsProvider } from './bench/benchCommandsProvider';
-import { DatabaseProvider } from './bench/databaseProvider';
+import { SkillsWebviewProvider } from './agents/skillsWebviewProvider';
+import { BenchCommandsWebviewProvider } from './bench/benchCommandsWebviewProvider';
+import { DatabaseWebviewProvider } from './bench/databaseWebviewProvider';
 import { PlaygroundProvider } from './bench/playgroundProvider';
 
 // ─── Global log channel ───────────────────────────────────────────────────────
@@ -24,9 +24,9 @@ let benchDetector: BenchDetector;
 let benchExecutor: BenchExecutor | null = null;
 let sessionManager: SessionManager | null = null;
 let skillsStore: SkillsStore | null = null;
-let skillsProvider: SkillsProvider | null = null;
-let benchCommandsProvider: BenchCommandsProvider | null = null;
-let databaseProvider: DatabaseProvider | null = null;
+let skillsWebviewProvider: SkillsWebviewProvider | null = null;
+let benchCommandsWebviewProvider: BenchCommandsWebviewProvider | null = null;
+let databaseWebviewProvider: DatabaseWebviewProvider | null = null;
 let playgroundProvider: PlaygroundProvider | null = null;
 let chatPanel: ChatPanel | null = null;
 let benchEnv: BenchEnvironment | null = null;
@@ -55,7 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
     sessionManager = new SessionManager(frappeCopilotPath);
     skillsStore = new SkillsStore(frappeCopilotPath, path.join(extensionPath, 'assets', 'skills'));
     skillsStore.migrateLegacyMemoryIfNeeded();
-    skillsProvider = new SkillsProvider(skillsStore);
+    skillsWebviewProvider = new SkillsWebviewProvider(context.extensionUri, skillsStore);
   }
 
   // Create status bar item (must be before any updateStatusBar calls)
@@ -89,21 +89,21 @@ export function activate(context: vscode.ExtensionContext) {
       sessionManager
     );
   }
-  if (skillsProvider) {
-    vscode.window.registerTreeDataProvider(
+  if (skillsWebviewProvider) {
+    vscode.window.registerWebviewViewProvider(
       'frappe-copilot.skills',
-      skillsProvider
+      skillsWebviewProvider
     );
   }
-  benchCommandsProvider = new BenchCommandsProvider();
-  vscode.window.registerTreeDataProvider(
+  benchCommandsWebviewProvider = new BenchCommandsWebviewProvider(context.extensionUri);
+  vscode.window.registerWebviewViewProvider(
     'frappe-copilot.benchCommands',
-    benchCommandsProvider
+    benchCommandsWebviewProvider
   );
-  databaseProvider = new DatabaseProvider(() => benchExecutor);
-  vscode.window.registerTreeDataProvider(
+  databaseWebviewProvider = new DatabaseWebviewProvider(context.extensionUri, () => benchExecutor);
+  vscode.window.registerWebviewViewProvider(
     'frappe-copilot.database',
-    databaseProvider
+    databaseWebviewProvider
   );
 
   playgroundProvider = new PlaygroundProvider();
@@ -292,7 +292,7 @@ async function runBenchSetupWizard(): Promise<void> {
     if (chatPanel) {
       chatPanel.setBenchEnv(env);
     }
-    databaseProvider?.refresh();
+    databaseWebviewProvider?.refresh();
   }
 }
 
@@ -364,7 +364,7 @@ async function detectBenchEnvironment(force: boolean = false): Promise<void> {
     if (env.type !== 'not-found') {
       benchExecutor = new BenchExecutor(env);
       updateBenchConfig(env);
-      databaseProvider?.refresh();
+      databaseWebviewProvider?.refresh();
     }
 
     switch (env.type) {
@@ -430,7 +430,7 @@ async function createNewSkill(): Promise<void> {
   });
 
   const filePath = skillsStore.createSkill(name.trim(), (description || '').trim());
-  skillsProvider?.refresh();
+  skillsWebviewProvider?.refresh();
   // createSkill returns the file path; its id is the basename minus '.md'.
   chatPanel?.notifySkillCreated(path.basename(filePath, '.md'));
   const doc = await vscode.workspace.openTextDocument(filePath);
@@ -478,7 +478,7 @@ async function importSkillFromFile(): Promise<void> {
     return;
   }
 
-  skillsProvider?.refresh();
+  skillsWebviewProvider?.refresh();
   chatPanel?.notifySkillCreated(result.id!);
   vscode.window.showInformationMessage(`Frappe Copilot: Imported skill '${result.id}'.`);
 }
