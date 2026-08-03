@@ -58,6 +58,8 @@ export function activate(context: vscode.ExtensionContext) {
     skillsWebviewProvider = new SkillsWebviewProvider(context.extensionUri, skillsStore);
   }
 
+
+
   // Create status bar item (must be before any updateStatusBar calls)
   statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Left,

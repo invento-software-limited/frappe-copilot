@@ -95,6 +95,7 @@ export class ChatPanel {
   public static readonly viewType = 'frappeCopilot.chat';
 
   private panel: vscode.WebviewPanel | null = null;
+  private webviewView: vscode.WebviewView | null = null;
   private disposables: vscode.Disposable[] = [];
   private uploadsDir: string = '';
   private toolExecutor: ToolExecutor;
@@ -166,7 +167,11 @@ export class ChatPanel {
         return vscode.workspace.getConfiguration('frappe-copilot.opencodeZen').get<string>('endpoint', 'https://opencode.ai/zen/v1');
     }
   }
-  private say(type: string, data: any) { this.panel?.webview.postMessage({ type, ...(typeof data === 'object' ? data : { status: data }) }); }
+  private say(type: string, data: any) {
+    const payload = { type, ...(typeof data === 'object' ? data : { status: data }) };
+    this.webviewView?.webview.postMessage(payload);
+    this.panel?.webview.postMessage(payload);
+  }
   private chat(role: string, content: string) { this.say('addMessage', { message: { role, content } }); }
 
   close(): void { this.panel?.dispose(); }
@@ -1526,7 +1531,7 @@ export class ChatPanel {
    *  to be found and executed (see runOneAgentStep). */
   private async stream(msgs: { role: string; content: string }[], runId?: string): Promise<{ content: string; reasoning: string }> {
     var full = '', fullReasoning = '', id = '' + Date.now();
-    this.panel?.webview.postMessage({ type: 'startStream', messageId: id });
+    this.postWebviewMessage({ type: 'startStream', messageId: id });
     try {
       const options: any = { maxTokens: 8192 };
       if (this.activeModel) {
@@ -1544,16 +1549,21 @@ export class ChatPanel {
         }
         full += c.content;
         fullReasoning += c.reasoning || '';
-        this.panel?.webview.postMessage({ 
+        this.postWebviewMessage({ 
           type: 'streamChunk', 
           messageId: id, 
           chunk: c.content,
           reasoning: c.reasoning || ''
         });
       }
-    } catch (e) { this.panel?.webview.postMessage({ type: 'streamError', messageId: id, error: String(e) }); throw e; }
-    this.panel?.webview.postMessage({ type: 'endStream', messageId: id, fullContent: full, fullReasoning: fullReasoning });
+    } catch (e) { this.postWebviewMessage({ type: 'streamError', messageId: id, error: String(e) }); throw e; }
+    this.postWebviewMessage({ type: 'endStream', messageId: id, fullContent: full, fullReasoning: fullReasoning });
     return { content: full, reasoning: fullReasoning };
+  }
+
+  private postWebviewMessage(msg: any) {
+    this.webviewView?.webview.postMessage(msg);
+    this.panel?.webview.postMessage(msg);
   }
 
   dispose(): void {

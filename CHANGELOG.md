@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.1] - 2026-08-03
+
+### Changed
+
+- **Non-Replacing Side Panel Chat View** — Configured chat window to open in a dedicated editor panel column beside active code files (`ViewColumn.Beside`). Prevents code files from overwriting/replacing the chat panel when opened, allowing side-by-side editing while keeping a single unified activity bar icon for sessions and tools.
+
 ## [1.3.0] - 2026-08-03
 
 ### Added
