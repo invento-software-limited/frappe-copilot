@@ -15,5 +15,5 @@ Assistant: "I will use grep search to look for server script calls in hooks.py f
   <query>fixtures</query>
 </tool_call>`,
   allowedTools: ALL_TOOLS,
-  highRiskTools: ['write_file', 'edit_file', 'execute_command', 'write_custom_field', 'write_property_setter', 'write_client_script', 'write_server_script', 'export_customizations', 'write_builder_page'],
+  highRiskTools: ['write_file', 'edit_file', 'execute_command', 'write_custom_field', 'write_property_setter', 'write_client_script', 'write_server_script', 'export_customizations', 'write_builder_page', 'call_mcp_tool'],
 };

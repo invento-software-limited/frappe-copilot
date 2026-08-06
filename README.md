@@ -8,6 +8,7 @@ live bench command execution, and a visual workflow graph.
 
 ## Features
 
+- **🔌 MCP (Model Context Protocol) Server Integration** — Connect local (`stdio`) or remote (`http`) MCP servers from a dedicated sidebar Webview; agents discover and call their tools via `call_mcp_tool` from an auto-generated catalog in the system prompt.
 - **⚡ Interactive Webview Grid Views** — Modern visual grid UIs in the sidebar for **Bench Commands**, **Skills Library**, and **Database Explorer** with real-time search, quick action bars, schema inspector cards, and top command highlights (`clear-cache`, `migrate`, `restart`, `get-app`, `install-app`).
 - **🗄️ Database Explorer Webview** — Dedicated sidebar view to inspect sites, filter database tables instantly, view column field names & SQL data types, and launch `MariaDB` or `Python` consoles.
 - **💻 Bench Playground (Interactive REPLs)** — Instant one-click access to open `bench console` (Python shell) and `bench mariadb` (SQL console) in integrated VS Code terminals with full Docker TTY support.
@@ -38,7 +39,7 @@ live bench command execution, and a visual workflow graph.
 
 To install the extension from the compiled VSIX package:
 
-1. Download the latest `frappe-copilot-1.3.0.vsix` asset.
+1. Download the latest `frappe-copilot-1.4.0.vsix` asset.
 2. In VS Code, press **Ctrl+Shift+P** (or **Cmd+Shift+P**) to open the Command Palette.
 3. Run the command **Extensions: Install from VSIX...**.
 4. Select the downloaded `.vsix` file to install it.
@@ -77,6 +78,9 @@ You can re-detect at any time via **Frappe Copilot: Configure Bench Environment*
 | `Frappe Copilot: Mention Selected Code` | Insert selected editor text as a context mention into the chat |
 | `Frappe Copilot: New Skill` | Create a new custom developer skill |
 | `Frappe Copilot: Import Skill (.md/.zip)` | Import a custom developer skill from a Markdown template or a zip package |
+| `Frappe Copilot: Add MCP Server (Local)` | Connect a local (`stdio`) MCP server |
+| `Frappe Copilot: Add MCP Server (Remote)` | Connect a remote (`http`) MCP server |
+| `Frappe Copilot: Refresh MCP Servers` | Reconnect and refresh the tool catalog for all configured MCP servers |
 
 ## Configuration
 
@@ -169,6 +173,7 @@ When you send a message, the AI can autonomously invoke the following tools in a
 | `update_todo_list` | Create/update a visual todo list | ❌ No |
 | `web_search` | Search the web via DuckDuckGo | ❌ No |
 | `web_fetch` | Fetch and clean text from a URL | ❌ No |
+| `call_mcp_tool` | Call a tool exposed by a connected MCP server | ❌ No |
 
 After every `write_file` or `edit_file`, the agent automatically runs syntax validation
 (`python -m py_compile` for `.py`, `node -c` for `.js`) and reports any compilation errors.
@@ -268,6 +273,11 @@ src/
 │   ├── extractor.ts         # PDF/text file content extraction
 │   ├── fileReader.ts        # Unified file reading API
 │   └── splitter.ts          # Text chunking for parallel analysis
+├── mcp/
+│   ├── manager.ts           # MCP server lifecycle, connections, tool catalog
+│   ├── store.ts             # Persisted MCP server configuration
+│   ├── types.ts             # MCP config/tool type definitions
+│   └── webviewProvider.ts   # MCP Servers sidebar Webview
 ├── providers/
 │   ├── interface.ts         # LLMProvider interface
 │   ├── dynamic.ts           # Provider router (opencode-zen/openai/anthropic)

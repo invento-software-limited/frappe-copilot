@@ -992,7 +992,8 @@ window.onerror = function(message, source, lineno, colno, error) {
     introspect_doctype: { icon: '📊', title: 'Introspect DocType' },
     web_search: { icon: '🌐', title: 'Web Search' },
     web_fetch: { icon: '📥', title: 'Fetch Web Page' },
-    use_skill: { icon: '📎', title: 'Use Skill' }
+    use_skill: { icon: '📎', title: 'Use Skill' },
+    call_mcp_tool: { icon: '🔌', title: 'MCP Tool Call' }
   };
 
   function stripToolCalls(t) {
@@ -2211,6 +2212,8 @@ window.onerror = function(message, source, lineno, colno, error) {
       argDetails = 'URL: ' + args.url;
     } else if (toolName === 'use_skill' && args.id) {
       argDetails = 'Skill: ' + args.id;
+    } else if (toolName === 'call_mcp_tool' && args.server) {
+      argDetails = 'Server: ' + args.server + ' | Tool: ' + (args.tool || '') + (args.arguments ? '\n' + args.arguments : '');
     } else if (toolName === 'ask_clarification') {
       var q = args.questions || args.question || '';
       argDetails = q;
@@ -2439,6 +2442,7 @@ window.onerror = function(message, source, lineno, colno, error) {
     if (tool === 'introspect_doctype') return 'Introspecting DocType: `' + (args.doctype || '') + '`';
     if (tool === 'web_search') return 'Searching the web for: "' + (args.query || '') + '"...';
     if (tool === 'web_fetch') return 'Fetching webpage: `' + (args.url || '') + '`';
+    if (tool === 'call_mcp_tool') return 'Calling MCP tool: `' + (args.server || '') + '.' + (args.tool || '') + '`';
     if (tool === 'ask_clarification') return 'Awaiting clarification answers...';
     if (tool === 'update_todo_list') return 'Updating tasks list...';
     return 'Running ' + tool + '...';

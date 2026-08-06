@@ -8,6 +8,7 @@ import { ToolName } from './types';
 import { readConfig } from '../workspace/structure';
 import { SkillsStore } from './skillsStore';
 import { isAutoApprove } from './approvalMode';
+import { MCPManager } from '../mcp/manager';
 
 export interface ToolResult {
   success: boolean;
@@ -18,7 +19,8 @@ export class ToolExecutor {
   constructor(
     private workspaceRoot: string,
     private benchEnv: BenchEnvironment | null,
-    private skillsStore: SkillsStore | null = null
+    private skillsStore: SkillsStore | null = null,
+    private mcpManager: MCPManager | null = null
   ) {}
 
   setBenchEnv(env: BenchEnvironment | null) {
@@ -70,6 +72,8 @@ export class ToolExecutor {
           return await this.webFetch(args.url);
         case 'use_skill':
           return await this.useSkill(args.id);
+        case 'call_mcp_tool':
+          return await this.callMcpTool(args);
         default:
           return { success: false, output: `Unknown tool: ${name}` };
       }
@@ -359,9 +363,20 @@ export class ToolExecutor {
    * into a temporary `.py` file that exports a single `execute()` function
    * (the convention `bench execute` calls), invoke it, then delete the file.
    *
+   * The temp module is nested inside the `frappe` app's own package
+   * (`apps/frappe/frappe/_fc_tmp_*.py`), NOT dropped directly under `apps/`.
+   * `bench execute <path>` resolves through `frappe.get_attr()`, which requires
+   * the leading dotted segment to be the name of an *installed app*
+   * (`frappe.get_installed_apps()`) before it will even attempt the import —
+   * a bare `apps/_fc_tmp_xxx.py` file has no such segment, so it always threw
+   * `AppNotInstalledError`, which `bench execute` then silently swallows and
+   * retries as a raw `eval()`, surfacing a confusing `NameError` instead.
+   * `frappe` is guaranteed to be installed on every site, so nesting under it
+   * satisfies that check on both host and Docker.
+   *
    * The file is written differently depending on the bench environment:
    *  - host  → written directly via Node's `fs`
-   *  - docker → piped in via `docker exec ... python3 -c 'import sys; open(path, "w").write(sys.stdin.read())'`
+   *  - docker → piped in via `docker exec ... sh -c 'echo <base64> | base64 -d > path'`
    *
    * `code` is a semicolon-joined Python one-liner. We embed it verbatim inside
    * `exec(...)` so splitting on `;` is never needed and the code is always
@@ -369,6 +384,7 @@ export class ToolExecutor {
   private async runPythonOneLiner(site: string, code: string): Promise<ToolResult> {
     const stem = `_fc_tmp_${Date.now()}`;
     const tmpName = `${stem}.py`;
+    const execMethod = `frappe.${stem}.execute`;
 
     // exec() runs arbitrary statement code (unlike eval which only handles expressions).
     const fileContent = [
@@ -381,7 +397,7 @@ export class ToolExecutor {
     if (this.benchEnv?.type === 'docker' && this.benchEnv.containerId && this.benchEnv.benchDir) {
       const containerId = this.benchEnv.containerId;
       const benchDir = this.benchEnv.benchDir;
-      const remotePath = `${benchDir}/apps/${tmpName}`;
+      const remotePath = `${benchDir}/apps/frappe/frappe/${tmpName}`;
 
       // Write file content into the container using python3 to avoid shell quoting issues
       const b64Content = Buffer.from(fileContent, 'utf-8').toString('base64');
@@ -391,17 +407,17 @@ export class ToolExecutor {
         return { success: false, output: `Failed to write temp script to container: ${writeResult.output}` };
       }
 
-      const execCmd = `bench --site ${site} execute ${stem}.execute`;
+      const execCmd = `bench --site ${site} execute ${execMethod}`;
       const result = await this.executeCommand(execCmd);
 
       // Clean up regardless of success
       await this.executeCommand(`docker exec ${containerId} rm -f ${remotePath}`);
       return result;
     } else {
-      // Host environment: write via Node fs into the bench apps dir
+      // Host environment: write via Node fs into the frappe app's package dir
       const benchEnvDir = (this.benchEnv && this.benchEnv.type !== 'not-found') ? this.benchEnv.benchDir : undefined;
       const benchDir = benchEnvDir || (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? this.workspaceRoot);
-      const localPath = path.join(benchDir, 'apps', tmpName);
+      const localPath = path.join(benchDir, 'apps', 'frappe', 'frappe', tmpName);
 
       try {
         fs.writeFileSync(localPath, fileContent, 'utf8');
@@ -409,7 +425,7 @@ export class ToolExecutor {
         return { success: false, output: `Failed to write temp script to '${localPath}': ${e.message}` };
       }
 
-      const execCmd = `bench --site ${site} execute ${stem}.execute`;
+      const execCmd = `bench --site ${site} execute ${execMethod}`;
       const result = await this.executeCommand(execCmd);
 
       // Clean up
@@ -766,6 +782,26 @@ export class ToolExecutor {
     const content = this.skillsStore.readSkill(id);
     if (content === null) return { success: false, output: `No skill found with id '${id}'.` };
     return { success: true, output: content };
+  }
+
+  /** Dispatches a call_mcp_tool invocation to the connected MCP server. `arguments`
+   *  arrives as a JSON string (this app's tool-call protocol is flat XML-ish
+   *  tags, not native structured function calling) and is parsed into the
+   *  object the MCP client actually sends. */
+  async callMcpTool(args: Record<string, string>): Promise<ToolResult> {
+    if (!this.mcpManager) return { success: false, output: 'No MCP servers configured for this workspace.' };
+    const { server, tool } = args;
+    if (!server || !tool) return { success: false, output: 'Missing required parameter(s): server, tool' };
+
+    let parsedArgs: Record<string, unknown> = {};
+    if (args.arguments && args.arguments.trim()) {
+      try {
+        parsedArgs = JSON.parse(args.arguments);
+      } catch (e: any) {
+        return { success: false, output: `'arguments' must be valid JSON: ${e.message}` };
+      }
+    }
+    return await this.mcpManager.callTool(server, tool, parsedArgs);
   }
 
   async webFetch(urlStr: string): Promise<ToolResult> {

@@ -2,7 +2,7 @@
   "name": "frappe-copilot",
   "displayName": "Frappe Copilot",
   "description": "AI-powered Frappe/ERPNext development assistant. Integrates with OpenCode Zen for agentic code generation, bench management, and Frappe app scaffolding.",
-  "version": "1.3.2",
+  "version": "1.4.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/invento-software-limited/frappe-copilot.git"
@@ -62,6 +62,18 @@
       {
         "command": "frappe-copilot.importSkill",
         "title": "Frappe Copilot: Import Skill (.md/.zip)"
+      },
+      {
+        "command": "frappe-copilot.addMcpServer",
+        "title": "Frappe Copilot: Add MCP Server (Local)"
+      },
+      {
+        "command": "frappe-copilot.addMcpRemoteServer",
+        "title": "Frappe Copilot: Add MCP Server (Remote)"
+      },
+      {
+        "command": "frappe-copilot.refreshMcpServers",
+        "title": "Frappe Copilot: Refresh MCP Servers"
       }
     ],
     "viewsContainers": {
@@ -94,6 +106,11 @@
           "type": "webview",
           "id": "frappe-copilot.database",
           "name": "Database"
+        },
+        {
+          "type": "webview",
+          "id": "frappe-copilot.mcpServers",
+          "name": "MCP Servers"
         },
         {
           "type": "tree",
@@ -293,6 +310,21 @@
           "command": "frappe-copilot.importSkill",
           "when": "view == frappe-copilot.skills",
           "group": "navigation"
+        },
+        {
+          "command": "frappe-copilot.addMcpServer",
+          "when": "view == frappe-copilot.mcpServers",
+          "group": "navigation"
+        },
+        {
+          "command": "frappe-copilot.addMcpRemoteServer",
+          "when": "view == frappe-copilot.mcpServers",
+          "group": "navigation"
+        },
+        {
+          "command": "frappe-copilot.refreshMcpServers",
+          "when": "view == frappe-copilot.mcpServers",
+          "group": "navigation"
         }
       ],
       "editor/context": [
@@ -320,6 +352,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.208",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "adm-zip": "^0.5.18",
     "diff": "^5.2.2",
     "js-yaml": "^5.2.2",

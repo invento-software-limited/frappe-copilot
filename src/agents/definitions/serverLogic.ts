@@ -5,8 +5,8 @@ export const serverLogicAgent: AgentDefinition = {
   label: 'Server-side Logic',
   icon: '🐍',
   description: 'Python controllers, hooks.py wiring, whitelisted APIs, background jobs, frappe.db/ORM usage, and Server Scripts.',
-  allowedTools: ['read_file', 'write_file', 'edit_file', 'list_dir', 'grep_search', 'introspect_doctype', 'list_customizations', 'write_server_script', 'execute_command', 'ask_clarification', 'update_todo_list', 'use_skill'],
-  highRiskTools: ['write_file', 'edit_file', 'execute_command', 'write_server_script'],
+  allowedTools: ['read_file', 'write_file', 'edit_file', 'list_dir', 'grep_search', 'introspect_doctype', 'list_customizations', 'write_server_script', 'execute_command', 'ask_clarification', 'update_todo_list', 'use_skill', 'call_mcp_tool'],
+  highRiskTools: ['write_file', 'edit_file', 'execute_command', 'write_server_script', 'call_mcp_tool'],
   promptSection: `### Server-side Logic Focus
 - Prefer frappe.db.get_value / get_all / exists for read paths and frappe.get_doc only when you need full document behavior (validation, hooks, child tables) — get_all with filters is cheaper than looping over get_doc.
 - Whitelisted endpoints: use @frappe.whitelist(), validate frappe.has_permission(...) explicitly if the endpoint bypasses the standard doctype permission model, and never trust client-supplied filters/SQL fragments directly.

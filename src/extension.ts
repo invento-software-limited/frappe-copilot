@@ -13,6 +13,8 @@ import { SkillsWebviewProvider } from './agents/skillsWebviewProvider';
 import { BenchCommandsWebviewProvider } from './bench/benchCommandsWebviewProvider';
 import { DatabaseWebviewProvider } from './bench/databaseWebviewProvider';
 import { PlaygroundProvider } from './bench/playgroundProvider';
+import { MCPManager } from './mcp/manager';
+import { MCPWebviewProvider } from './mcp/webviewProvider';
 
 // ─── Global log channel ───────────────────────────────────────────────────────
 export const logChannel = vscode.window.createOutputChannel('Frappe Copilot');
@@ -28,6 +30,8 @@ let skillsWebviewProvider: SkillsWebviewProvider | null = null;
 let benchCommandsWebviewProvider: BenchCommandsWebviewProvider | null = null;
 let databaseWebviewProvider: DatabaseWebviewProvider | null = null;
 let playgroundProvider: PlaygroundProvider | null = null;
+let mcpManager: MCPManager | null = null;
+let mcpWebviewProvider: MCPWebviewProvider | null = null;
 let chatPanel: ChatPanel | null = null;
 let benchEnv: BenchEnvironment | null = null;
 let statusBarItem: vscode.StatusBarItem;
@@ -56,6 +60,17 @@ export function activate(context: vscode.ExtensionContext) {
     skillsStore = new SkillsStore(frappeCopilotPath, path.join(extensionPath, 'assets', 'skills'));
     skillsStore.migrateLegacyMemoryIfNeeded();
     skillsWebviewProvider = new SkillsWebviewProvider(context.extensionUri, skillsStore);
+
+    // One shared MCPManager for the whole extension session — the chat panel and
+    // the sidebar view both point at this same instance (see ChatPanel/openChat
+    // below) rather than each constructing their own, since a connection here is
+    // a real child process or socket, unlike SkillsStore's cheap file reads.
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    mcpManager = new MCPManager(frappeCopilotPath, workspaceRoot, context.extension?.packageJSON?.version || '0.0.0');
+    mcpWebviewProvider = new MCPWebviewProvider(context.extensionUri, mcpManager);
+    // Fire-and-forget: connecting enabled servers must never delay activation,
+    // and a slow/hanging one must never block the others (see MCPManager.initialize).
+    mcpManager.initialize().catch(err => logChannel.appendLine(`MCP initialize error: ${err}`));
   }
 
 
@@ -114,6 +129,13 @@ export function activate(context: vscode.ExtensionContext) {
     playgroundProvider
   );
 
+  if (mcpWebviewProvider) {
+    vscode.window.registerWebviewViewProvider(
+      'frappe-copilot.mcpServers',
+      mcpWebviewProvider
+    );
+  }
+
   // Listen for config changes
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
@@ -128,6 +150,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
   chatPanel?.close();
+  mcpManager?.dispose().catch(() => { /* best-effort on shutdown */ });
 }
 
 // ─── Command Registration ────────────────────────────────────────────────────
@@ -220,6 +243,26 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('frappe-copilot.importSkill', async () => {
       await importSkillFromFile();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.addMcpServer', async () => {
+      await vscode.commands.executeCommand('frappe-copilot.mcpServers.focus');
+      mcpWebviewProvider?.triggerAddForm('stdio');
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.addMcpRemoteServer', async () => {
+      await vscode.commands.executeCommand('frappe-copilot.mcpServers.focus');
+      mcpWebviewProvider?.triggerAddForm('http');
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.refreshMcpServers', () => {
+      mcpWebviewProvider?.refresh();
     })
   );
 
@@ -343,7 +386,8 @@ async function openChat() {
       extensionPath,
       provider,
       sessionManager,
-      benchEnv
+      benchEnv,
+      mcpManager
     );
   }
 

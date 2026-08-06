@@ -23,6 +23,16 @@ export interface ImageAttachment {
 export interface Message {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** For a system message: length of the leading slice of `content` that is
+   *  static per-agent boilerplate (identity, guidelines, tool docs) as opposed
+   *  to per-turn dynamic context (RAG snippets, schema directory, skills/MCP
+   *  catalogs) appended after it — see ChatPanel.runOneAgentStep. Providers
+   *  that support a cacheable-prefix/dynamic-suffix split in their system
+   *  prompt (currently only ClaudeAgentSdkProvider, via the SDK's
+   *  SYSTEM_PROMPT_DYNAMIC_BOUNDARY) use this to keep the large static part a
+   *  stable cache hit across turns even when the dynamic tail changes.
+   *  Providers without that capability just ignore it and use `content` whole. */
+  staticPrefixLength?: number;
   /** Images attached to a user message, for vision-capable providers. */
   images?: ImageAttachment[];
   /** Set on the summary message a task-specialized agent leaves in the main

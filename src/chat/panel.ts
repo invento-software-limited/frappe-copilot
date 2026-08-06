@@ -21,6 +21,7 @@ import {
 import { VectorStore } from '../agents/vectorStore';
 import { GraphStore } from '../agents/graphStore';
 import { SkillsStore } from '../agents/skillsStore';
+import { MCPManager } from '../mcp/manager';
 import { readConfig } from '../workspace/structure';
 import { estimateMessagesTokens, buildCompactionPrompt, DEFAULT_COMPACTION_THRESHOLD_TOKENS } from '../session/compaction';
 import { diffLines } from 'diff';
@@ -119,7 +120,11 @@ export class ChatPanel {
     private readonly extensionPath: string,
     private provider: LLMProvider,
     private sessionManager: SessionManager,
-    private benchEnv: BenchEnvironment | null
+    private benchEnv: BenchEnvironment | null,
+    // Shared singleton from extension.ts, not constructed here — unlike
+    // SkillsStore (cheap file reads), each MCP connection is a real child
+    // process/socket, so there must only ever be one manager instance.
+    private mcpManager: MCPManager | null = null
   ) {
     const fp = this.getFrappeCopilotPath();
     if (fp) {
@@ -132,7 +137,7 @@ export class ChatPanel {
     }
 
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    this.toolExecutor = new ToolExecutor(root, benchEnv, this.skillsStore);
+    this.toolExecutor = new ToolExecutor(root, benchEnv, this.skillsStore, this.mcpManager);
   }
 
   show(): void {
@@ -1124,10 +1129,27 @@ export class ChatPanel {
       }
     }
 
+    let mcpCatalog = '';
+    if (this.mcpManager && agent.allowedTools.includes('call_mcp_tool')) {
+      const catalog = this.mcpManager.buildCatalog();
+      if (catalog) {
+        mcpCatalog = `\n\n### Available MCP Tools\nCall 'call_mcp_tool' with the server id and tool name shown below:\n\n${catalog}`;
+      }
+    }
+
+    // Static per-agent boilerplate (identity/guidelines/tool docs) vs. the
+    // per-turn dynamic tail (RAG/schema/skills/MCP context) — kept as two
+    // pieces so a provider that supports a cacheable-prefix split (see
+    // Message.staticPrefixLength) doesn't lose its cache hit on the big
+    // static part just because the dynamic part changed this turn.
+    const staticSystemPart = buildSystemPrompt(agent);
+    const dynamicSystemPart = ragContext + schemaContext + skillsCatalog + mcpCatalog + this.activeSkillContext;
+
     const messages = this.hydrateImages([
       {
         role: 'system',
-        content: buildSystemPrompt(agent) + ragContext + schemaContext + skillsCatalog + this.activeSkillContext
+        content: staticSystemPart + dynamicSystemPart,
+        staticPrefixLength: staticSystemPart.length
       },
       ...baseHistory,
       ...localHistory

@@ -5,8 +5,8 @@ export const doctypeBuilderAgent: AgentDefinition = {
   label: 'DocType / Schema Builder',
   icon: '🗄️',
   description: 'Creating or modifying DocTypes, fields, and permissions — including Custom Fields and Property Setters on standard DocTypes — inspects existing schema before writing JSON/controller boilerplate.',
-  allowedTools: ['read_file', 'write_file', 'edit_file', 'list_dir', 'grep_search', 'introspect_doctype', 'list_customizations', 'write_custom_field', 'write_property_setter', 'export_customizations', 'ask_clarification', 'update_todo_list', 'use_skill'],
-  highRiskTools: ['write_file', 'edit_file', 'write_custom_field', 'write_property_setter', 'export_customizations'],
+  allowedTools: ['read_file', 'write_file', 'edit_file', 'list_dir', 'grep_search', 'introspect_doctype', 'list_customizations', 'write_custom_field', 'write_property_setter', 'export_customizations', 'ask_clarification', 'update_todo_list', 'use_skill', 'call_mcp_tool'],
+  highRiskTools: ['write_file', 'edit_file', 'write_custom_field', 'write_property_setter', 'export_customizations', 'call_mcp_tool'],
   promptSection: `### DocType / Schema Builder Focus
 - Always call 'introspect_doctype' on any DocType you are about to modify (and on any DocType it links to) before writing a field change — never assume the current schema.
 - New DocTypes are JSON files under <app>/<app>/<module>/doctype/<doctype_name>/<doctype_name>.json, with a matching '<doctype_name>.py' controller (even if it just extends Document) and '<doctype_name>.js' if the module needs client-side wiring.

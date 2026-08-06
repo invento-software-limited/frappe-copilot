@@ -141,8 +141,10 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
   private resolveTurn(
     messages: Message[],
     runId: string | undefined
-  ): { system?: string; prompt: string; images: ImageAttachment[]; resume?: string } {
-    const system = messages.find(m => m.role === 'system')?.content;
+  ): { system?: string; systemStaticPrefixLength?: number; prompt: string; images: ImageAttachment[]; resume?: string } {
+    const systemMessage = messages.find(m => m.role === 'system');
+    const system = systemMessage?.content;
+    const systemStaticPrefixLength = systemMessage?.staticPrefixLength;
     const nonSystem = messages.filter(m => m.role !== 'system');
 
     const checkpoint = runId ? this.runs.get(runId) : undefined;
@@ -165,7 +167,28 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     const images = toSend.flatMap(m => (m.images || []).filter(img => !!img.data));
     const prompt = this.turnsToPrompt(this.mergeTurns(toSend));
 
-    return { system, prompt, images, resume };
+    return { system, systemStaticPrefixLength, prompt, images, resume };
+  }
+
+  /** Splits `system` into `[staticPrefix, SYSTEM_PROMPT_DYNAMIC_BOUNDARY, dynamicSuffix]`
+   *  when a valid boundary was given, so the SDK can keep the (usually much
+   *  larger) static prefix — agent identity, guidelines, tool docs — a stable
+   *  prompt-cache hit across turns even though the dynamic suffix (RAG
+   *  snippets, schema directory, skills/MCP catalogs) changes turn to turn.
+   *  Falls back to the plain string form when there's no boundary, no dynamic
+   *  content, or the hint is stale (e.g. shorter than the prefix actually
+   *  present) — the API silently accepts a plain string either way. */
+  private buildSystemPromptOption(
+    sdk: ClaudeAgentSdk,
+    system: string,
+    staticPrefixLength: number | undefined
+  ): string | string[] {
+    if (!staticPrefixLength || staticPrefixLength <= 0 || staticPrefixLength >= system.length) {
+      return system;
+    }
+    const staticPrefix = system.slice(0, staticPrefixLength);
+    const dynamicSuffix = system.slice(staticPrefixLength);
+    return [staticPrefix, sdk.SYSTEM_PROMPT_DYNAMIC_BOUNDARY, dynamicSuffix];
   }
 
   /** Records how much of this run's transcript the resumed/newly-created
@@ -255,7 +278,7 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     abortSignal?: AbortSignal
   ): AsyncIterable<ChatResponse> {
     const sdk = await this.getSdk();
-    const { system, prompt, images, resume } = this.resolveTurn(messages, options?.runId);
+    const { system, systemStaticPrefixLength, prompt, images, resume } = this.resolveTurn(messages, options?.runId);
     const modelToUse = options?.model || this.model;
 
     const controller = new AbortController();
@@ -281,14 +304,22 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
       sdkOptions.resume = resume;
     }
     if (system) {
-      sdkOptions.systemPrompt = system;
+      sdkOptions.systemPrompt = this.buildSystemPromptOption(sdk, system, systemStaticPrefixLength);
     }
     if (this.extendedThinking) {
       // `adaptive` only works on Opus-class models (the SDK decides when/how much
       // to think for those); every model this provider offers, including the
       // default (claude-sonnet-5), needs the model-agnostic fixed-budget form
       // instead or the SDK silently emits no thinking_delta events at all.
-      sdkOptions.thinking = { type: 'enabled', budgetTokens: this.thinkingBudgetTokens };
+      //
+      // Even with `thinking` enabled, the API defaults to a "redacted" thinking
+      // phase — it streams only periodic token-count pings, no visible text —
+      // unless summaries are explicitly requested. `display: 'summarized'` is
+      // the per-request knob for that; `showThinkingSummaries` is the session-
+      // level one the Claude Code CLI's own transcript view (ctrl+o) uses. Both
+      // are needed, or thinking_delta events arrive with empty/no `thinking` text.
+      sdkOptions.thinking = { type: 'enabled', budgetTokens: this.thinkingBudgetTokens, display: 'summarized' };
+      sdkOptions.showThinkingSummaries = true;
     }
 
     let resultText: string | undefined;

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0] - 2026-08-06
+
+### Added
+
+- **MCP (Model Context Protocol) Server Integration** — New "MCP Servers" sidebar Webview to connect, manage, and browse external MCP servers (local `stdio` processes or remote `http`) directly from the extension, via `Frappe Copilot: Add MCP Server (Local)`, `Frappe Copilot: Add MCP Server (Remote)`, and `Frappe Copilot: Refresh MCP Servers`.
+- **`call_mcp_tool` Agent Tool** — Agents can now discover and invoke tools exposed by connected MCP servers through a catalog injected into the system prompt ("Available MCP Tools"), treating server responses as untrusted data the same way `web_fetch` results are handled.
+- **Cacheable System Prompt Split** — Split the system prompt into a stable static prefix (agent identity, guidelines, tool docs) and a per-turn dynamic suffix (RAG/schema/skills/MCP catalogs), passed to the Claude Agent SDK via `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` so the larger static portion keeps hitting the prompt cache even as the dynamic content changes turn to turn.
+
+### Fixed
+
+- **`bench execute` Temp Script Resolution** — Nested the temporary Python module used by `introspect_doctype` and other one-liner tools inside the `frappe` app's own package (`apps/frappe/frappe/_fc_tmp_*.py`) instead of directly under `apps/`. `bench execute`'s `frappe.get_attr()` resolver requires the leading dotted segment to be an installed app before attempting the import; a bare `apps/_fc_tmp_xxx.py` path failed that check silently and fell back to a confusing raw `NameError` instead of running the script.
+
 ## [1.3.2] - 2026-08-03
 
 ### Fixed
