@@ -47,6 +47,10 @@ export interface Message {
    *  Lets "revert changes from this prompt" aggregate every checkpoint that
    *  prompt produced, not just a single run's. */
   promptId?: string;
+  /** Set on an assistant turn that produced a durable plan — workspace-relative
+   *  path under .frappe-copilot/plans/ (see planStore.ts). Lets the transcript
+   *  link back to the plan file without regex-scraping message text on reload. */
+  planPath?: string;
 }
 
 /** Options passed to a provider chat call. */
@@ -186,8 +190,15 @@ export interface IntakeFile {
   name: string;
   type: IntakeFileType;
   size: number;
-  content: string;       // extracted text
+  content: string;       // extracted text (all pages joined)
   originalPath: string;
+  /** Per-page text, when the source has pages (PDF). Lets page-aligned chunking
+   *  (splitPagesIntoChunks) attach the right images to the right chunk. */
+  pageTexts?: string[];
+  /** Embedded raster images extracted from the source (diagrams/screenshots),
+   *  each tagged with the 1-based page it came from. Empty/absent for HTML or
+   *  when extraction found nothing worth keeping (see fileReader.ts filtering). */
+  images?: { page: number; image: ImageAttachment }[];
 }
 
 /** Result from one chunk reader agent. */
@@ -206,6 +217,11 @@ export interface MergedUnderstanding {
   frappeModules: string[];
   uiComponents: string[];
   dataModels: string[];
+  /** Relationships/continuations the merger found spanning multiple sections
+   *  (e.g. a DocType introduced in one section whose fields are extended in
+   *  another) — the direct fix for chunk readers otherwise losing connections
+   *  that only become visible once every section's findings are compared. */
+  crossReferences: string[];
   unknowns: string[];
 }
 

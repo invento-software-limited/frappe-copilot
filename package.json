@@ -2,7 +2,7 @@
   "name": "frappe-copilot",
   "displayName": "Frappe Copilot",
   "description": "AI-powered Frappe/ERPNext development assistant. Integrates with OpenCode Zen for agentic code generation, bench management, and Frappe app scaffolding.",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/invento-software-limited/frappe-copilot.git"
@@ -283,6 +283,17 @@
           "type": "boolean",
           "default": true,
           "description": "Show a dismissible banner offering to compact the conversation once it crosses the token threshold. Compaction is never applied automatically without this prompt — you can always trigger it manually via /compact regardless of this setting."
+        },
+        "frappe-copilot.intake.extractImages": {
+          "type": "boolean",
+          "default": true,
+          "description": "When analyzing an uploaded PDF, also extract embedded diagram/screenshot images and send them to the model alongside the text (requires a vision-capable model for real benefit). Disable if this causes packaging/performance issues in your environment."
+        },
+        "frappe-copilot.intake.maxExtractedImages": {
+          "type": "number",
+          "default": 24,
+          "description": "Maximum number of embedded images to extract from a single uploaded PDF (cost/latency control — each image is sent to the model as a vision attachment).",
+          "minimum": 0
         }
       }
     },
@@ -347,6 +358,7 @@
     "@types/diff": "^5.2.3",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.0",
+    "@types/pngjs": "^6.0.5",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.3.0"
   },
@@ -356,6 +368,7 @@
     "adm-zip": "^0.5.18",
     "diff": "^5.2.2",
     "js-yaml": "^5.2.2",
-    "pdfjs-dist": "^4.0.379"
+    "pdfjs-dist": "^4.0.379",
+    "pngjs": "^7.0.0"
   }
 }

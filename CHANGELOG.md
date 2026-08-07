@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.0] - 2026-08-07
+
+### Added
+
+- **Multi-Stage Plan Approval & Durable Plans** — A proposed multi-stage plan now stops for explicit user approval (approve/reject/revise) *before any stage runs*, independent of the ask/auto tool-approval setting (which only ever governed individual high-risk tool calls inside an already-running stage). Approved plans are written to `.frappe-copilot/plans/` as durable Markdown, with per-stage `COMMENT:` feedback re-fed into a dedicated revision pass (`reviseStagesWithComments`) that rewrites only the commented-on stages.
+- **`scaffold_app` / `scaffold_doctype` Agent Tools** — New DocTypes and apps are now created via `bench new-app` / `bench new-doctype` directly (reusing the existing command templates) instead of the model hand-authoring `hooks.py`/`setup.py`/DocType JSON from scratch. `scaffold_app` verifies the app actually landed on disk rather than trusting the exit code alone. Wired into the DocType/Schema Builder and Bench/DevOps agents.
+- **PDF Diagram/Image Extraction for Document Intake** — Uploaded PDFs now have embedded diagrams/screenshots extracted alongside text (via `pngjs`) and sent to the model as vision attachments, with per-page text tracking so large-document chunking attaches the right images to the right chunk. The chunk merger now also explicitly surfaces cross-section relationships (e.g. a DocType introduced in one section, extended in another) instead of losing them across chunk boundaries. Configurable via `frappe-copilot.intake.extractImages` / `maxExtractedImages`.
+- **Richer Clarification Popup** — `ask_clarification` questions can now render as single-select (radio) or multi-select (checkbox) options, mark one option `(recommended)` for a pre-selected, badge-highlighted default, and offer a free-text "Other" option that reveals a text field in place — instead of every question forcing free text or a plain unweighted choice.
+
+### Fixed
+
+- **`bench new-app` Silently Executing on the Host Instead of Docker** — `scaffold_app`'s command template (`printf "...\n" | bench new-app {app-name}`) doesn't start with the literal word `bench`, so the router that decides whether to prefix a command with `docker exec` (`executeCommand`'s `isBench` check) missed it entirely and let it fall through to the raw host shell, where `bench` isn't installed (`'bench' is not recognized...`). Broadened the detection to catch `bench` after a pipe, and made the Docker branch wrap piped/chained commands in `sh -c '...'` so the whole pipeline runs inside the container instead of splitting at the host shell.
+
 ## [1.4.0] - 2026-08-06
 
 ### Added

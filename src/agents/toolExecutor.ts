@@ -9,6 +9,7 @@ import { readConfig } from '../workspace/structure';
 import { SkillsStore } from './skillsStore';
 import { isAutoApprove } from './approvalMode';
 import { MCPManager } from '../mcp/manager';
+import { getCommandById, resolveCommand } from '../bench/commands';
 
 export interface ToolResult {
   success: boolean;
@@ -74,6 +75,10 @@ export class ToolExecutor {
           return await this.useSkill(args.id);
         case 'call_mcp_tool':
           return await this.callMcpTool(args);
+        case 'scaffold_app':
+          return await this.scaffoldApp(args);
+        case 'scaffold_doctype':
+          return await this.scaffoldDoctype(args);
         default:
           return { success: false, output: `Unknown tool: ${name}` };
       }
@@ -269,7 +274,12 @@ export class ToolExecutor {
 
     const activeRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || this.workspaceRoot;
     let fullCommand = commandStr;
-    const isBench = commandStr.trim().startsWith('bench');
+    // Matches 'bench ...' as well as a piped-into form like
+    // 'printf "...\n" | bench new-app {app-name}' (used by scaffoldApp) —
+    // a plain startsWith('bench') missed the latter, so those commands fell
+    // through with isBench=false and ran raw on the host shell instead of
+    // being routed into the bench dir / Docker container below.
+    const isBench = /(^|\|\s*)bench\b/.test(commandStr.trim());
     let cwdDir = activeRoot;
 
     if (isBench && this.benchEnv) {
@@ -280,7 +290,19 @@ export class ToolExecutor {
       } else if (this.benchEnv.type === 'docker') {
         const containerId = this.benchEnv.containerId;
         const workdir = this.benchEnv.benchDir;
-        fullCommand = `docker exec -w ${workdir} ${containerId} ${commandStr}`;
+        // A command containing shell metacharacters (the printf|bench pipe
+        // above, or &&/</>) must run *inside* the container's own shell —
+        // 'docker exec ... commandStr' with no shell execs commandStr's first
+        // token as a single program with the rest as literal argv, so a pipe
+        // in it would otherwise split at the *host* shell instead, leaving
+        // the piped-to segment (e.g. 'bench new-app ...') to run outside the
+        // container where 'bench' isn't installed.
+        if (/[|&<>]/.test(commandStr)) {
+          const escaped = commandStr.replace(/'/g, "'\\''");
+          fullCommand = `docker exec -w ${workdir} ${containerId} sh -c '${escaped}'`;
+        } else {
+          fullCommand = `docker exec -w ${workdir} ${containerId} ${commandStr}`;
+        }
       }
     }
 
@@ -723,6 +745,98 @@ export class ToolExecutor {
     const code = `import frappe, json, base64; payload = json.loads(base64.b64decode('${b64}').decode('utf-8')); existing = frappe.db.get_value('Builder Page', {'page_name': payload['page_name']}, 'name'); doc = frappe.get_doc('Builder Page', existing) if existing else frappe.new_doc('Builder Page'); doc.page_name = payload['page_name']; doc.route = payload['route'] or doc.route; doc.page_title = payload['title'] or doc.page_title; doc.published = payload['published'] if payload['published'] is not None else doc.published; doc.blocks = payload['blocks_json']; doc.save(); frappe.db.commit(); print(json.dumps({'success': True, 'name': doc.name, 'route': doc.route, 'created': not existing}))`;
 
     return await this.runPythonOneLiner(activeSite, code);
+  }
+
+  /** Frappe app names are Python package names — lowercase, starting with a
+   *  letter, [a-z0-9_] after that. Anything else silently breaks `bench
+   *  new-app` (or produces an app that can't be imported), so normalize
+   *  rather than trust the model's raw string verbatim — the string can
+   *  ultimately trace back to content the model was asked to summarize
+   *  (e.g. an uploaded spec document), not just the user typing directly. */
+  private sanitizeAppName(raw: string): string {
+    let s = (raw || '').toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+/, '').replace(/_+$/, '').replace(/_+/g, '_');
+    if (!s || !/^[a-z]/.test(s)) s = 'app_' + s;
+    return s || 'my_app';
+  }
+
+  /** bench new-app's printf-piped answers (title/description/publisher/
+   *  email/license) and a DocType name are plain metadata with no
+   *  legitimate need for shell metacharacters. Rather than try to correctly
+   *  quote for whichever shell executeCommand ends up routing through (host
+   *  PowerShell, WSL sh, or a Docker `exec sh -c`), strip anything outside a
+   *  safe charset — simpler and safer than per-shell escaping, and closes
+   *  off command injection via a value the model echoed from document
+   *  content it was asked to analyze. */
+  private sanitizeMetaField(raw: string, fallback: string): string {
+    const cleaned = (raw || '').replace(/[^\w .,@'-]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return cleaned || fallback;
+  }
+
+  /** Scaffolds a new Frappe app via `bench new-app` (reusing the existing
+   *  printf-piped template in bench/commands.ts) instead of the model
+   *  hand-authoring hooks.py/setup.py/pyproject.toml/etc from scratch.
+   *  Verifies the app actually landed rather than trusting exit code alone —
+   *  the printf-piped answer sequence is inherently fragile against a Frappe
+   *  CLI version that adds/reorders a prompt, which would otherwise silently
+   *  mis-answer and produce a broken or absent app while still exiting 0. */
+  async scaffoldApp(args: Record<string, string>): Promise<ToolResult> {
+    if (!args.app_name) return { success: false, output: 'Missing app_name parameter' };
+    const cmd = getCommandById('new-app');
+    if (!cmd) return { success: false, output: "Internal error: 'new-app' bench command template not found." };
+
+    const appName = this.sanitizeAppName(args.app_name);
+    const resolved = resolveCommand(cmd, {
+      'app-name': appName,
+      'app-title': this.sanitizeMetaField(args.app_title, appName.replace(/_/g, ' ')),
+      'app-description': this.sanitizeMetaField(args.app_description, 'A Frappe application.'),
+      'app-publisher': this.sanitizeMetaField(args.app_publisher, 'Unknown'),
+      'app-email': this.sanitizeMetaField(args.app_email, 'admin@example.com'),
+      'app-license': this.sanitizeMetaField(args.app_license, 'MIT'),
+      'github-workflow': /^y(es)?$/i.test(args.github_workflow || '') ? 'y' : 'n',
+      'branch-name': this.sanitizeMetaField(args.branch_name, 'main'),
+    });
+
+    const result = await this.executeCommand(resolved);
+    if (!result.success) return result;
+
+    // Best-effort existence check, reusing runPythonOneLiner's already-solved
+    // host/Docker routing instead of a raw shell `test -f` (which wouldn't
+    // reliably land in the bench directory across host/Docker/WSL — only
+    // bench-prefixed commands get that routing in executeCommand). Skipped
+    // silently if no default site is configured yet (e.g. a brand new bench
+    // with no site created) — this is a sanity check, not a hard requirement.
+    const site = this.resolveSite(args.site);
+    if (site) {
+      const b64 = this.b64Json({ appName });
+      const code = `import frappe, json, base64, os; payload = json.loads(base64.b64decode('${b64}').decode('utf-8')); path = os.path.join('apps', payload['appName'], payload['appName'], 'hooks.py'); print(json.dumps({'exists': os.path.exists(path)}))`;
+      const check = await this.runPythonOneLiner(site, code);
+      if (!check.success || !check.output.includes('"exists": true')) {
+        return {
+          success: false,
+          output: `'bench new-app' exited successfully but apps/${appName}/${appName}/hooks.py wasn't found afterward — likely a prompt-order mismatch between the piped answers and this bench's Frappe/bench CLI version. Raw 'bench new-app' output:\n${result.output}`
+        };
+      }
+    }
+
+    return { success: true, output: `App '${appName}' scaffolded successfully.\n${result.output}` };
+  }
+
+  /** Scaffolds a new DocType's boilerplate (JSON + .py controller + .js) via
+   *  `bench new-doctype` instead of hand-authoring those files, so the
+   *  generated structure matches exactly what Frappe's own CLI produces for
+   *  this bench's Frappe version. Follow-up field/logic edits still go
+   *  through read_file/edit_file as normal. */
+  async scaffoldDoctype(args: Record<string, string>): Promise<ToolResult> {
+    const { name, app } = args;
+    if (!name || !app) return { success: false, output: 'Missing required parameter(s): name, app' };
+    const cmd = getCommandById('new-doctype');
+    if (!cmd) return { success: false, output: "Internal error: 'new-doctype' bench command template not found." };
+
+    const safeName = this.sanitizeMetaField(name, '');
+    if (!safeName) return { success: false, output: 'Invalid doctype name.' };
+    const safeApp = this.sanitizeAppName(app);
+
+    return await this.executeCommand(resolveCommand(cmd, { name: safeName, app: safeApp }));
   }
 
   async webSearch(query: string): Promise<ToolResult> {

@@ -48,7 +48,7 @@ STAGE: client-ui | Add client-side UI for the loyalty features built in the prev
 END`;
 }
 
-function parsePlan(raw: string, validIds: Set<string>): StagePlan[] | null {
+export function parsePlan(raw: string, validIds: Set<string>): StagePlan[] | null {
   if (!/^PLAN\s*$/m.test(raw)) return null;
   const lines = raw.split('\n').map(l => l.trim());
   const start = lines.findIndex(l => l === 'PLAN');
@@ -103,5 +103,65 @@ export async function routeOrPlan(
       : { kind: 'single', agentId: 'general', reasoning: 'Unparseable or ambiguous planner response' };
   } catch (e: any) {
     return { kind: 'single', agentId: 'general', reasoning: `Planner call failed: ${e.message || String(e)}` };
+  }
+}
+
+/** A user's `COMMENT:` line on the durable plan .md file, tied to the stage
+ *  it was written under (see planStore.ts's parsePlanComments). */
+export interface StageComment {
+  stageIndex: number;
+  comment: string;
+}
+
+/** Revises an already-produced stage plan against user feedback attached to
+ *  specific stages (the "Revise from comments" flow on the mandatory plan
+ *  approval gate — see ChatPanel.requirePlanApproval). One cheap classify-
+ *  shaped completion, same STAGE/PLAN grammar as routeOrPlan, so it reuses
+ *  the same strict parser: a malformed response means no revision happened
+ *  rather than a partially-trusted one. */
+export async function reviseStagesWithComments(
+  provider: LLMProvider,
+  originalStages: StagePlan[],
+  comments: StageComment[],
+  agents: AgentDefinition[]
+): Promise<StagePlan[] | null> {
+  const validIds = new Set(agents.map(a => a.id));
+  const roster = agents.map(a => `- ${a.id}: ${a.label} — ${a.description}`).join('\n');
+
+  const stagesText = originalStages
+    .map((s, i) => {
+      const feedback = comments.filter(c => c.stageIndex === i).map(c => c.comment);
+      const feedbackLine = feedback.length ? `\n   User feedback: ${feedback.join('; ')}` : '';
+      return `${i + 1}. [${s.agentId}] ${s.task}${feedbackLine}`;
+    })
+    .join('\n');
+
+  const system = `You are revising an existing multi-stage plan for Frappe Copilot, a Frappe/ERPNext coding assistant, based on user feedback attached to specific stages below.
+
+Available agents:
+${roster}
+
+Current plan, with any user feedback on a stage shown directly under it:
+${stagesText}
+
+Apply ONLY the requested changes, plus anything that must cascade from them (e.g. a later stage referencing something an earlier stage's change renamed or removed). Keep stages with no feedback as close to their original wording as possible — don't rewrite what wasn't asked to change.
+
+Respond with EXACTLY:
+PLAN
+STAGE: <agentId> | <task>
+STAGE: <agentId> | <task>
+END`;
+
+  try {
+    const response = await provider.chat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: 'Produce the revised plan.' },
+      ],
+      { maxTokens: 500, temperature: 0 }
+    );
+    return parsePlan(response.content, validIds);
+  } catch {
+    return null;
   }
 }

@@ -6,7 +6,7 @@ export type ToolName =
   | 'update_todo_list' | 'web_search' | 'web_fetch' | 'use_skill'
   | 'list_customizations' | 'write_custom_field' | 'write_property_setter'
   | 'write_client_script' | 'write_server_script' | 'export_customizations'
-  | 'write_builder_page' | 'call_mcp_tool';
+  | 'write_builder_page' | 'call_mcp_tool' | 'scaffold_app' | 'scaffold_doctype';
 
 export const ALL_TOOLS: ToolName[] = [
   'read_file', 'write_file', 'edit_file', 'list_dir', 'grep_search',
@@ -14,7 +14,7 @@ export const ALL_TOOLS: ToolName[] = [
   'update_todo_list', 'web_search', 'web_fetch', 'use_skill',
   'list_customizations', 'write_custom_field', 'write_property_setter',
   'write_client_script', 'write_server_script', 'export_customizations',
-  'write_builder_page', 'call_mcp_tool',
+  'write_builder_page', 'call_mcp_tool', 'scaffold_app', 'scaffold_doctype',
 ];
 
 /** A task-specialized agent: its own scoped system prompt and tool allowlist,

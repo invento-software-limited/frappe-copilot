@@ -7,13 +7,16 @@ import { runClaudeOAuthFlow } from '../providers/anthropicOAuth';
 import { SessionManager } from '../session/manager';
 import { BenchEnvironment, Session, Message, CheckpointEntry, ImageAttachment } from '../types';
 import { readIntakeFile } from '../intake/fileReader';
+import { splitContent, splitPagesIntoChunks, MAX_CHUNK_CHARS } from '../intake/splitter';
+import { extractContent, renderMergedUnderstandingAsMarkdown } from '../intake/extractor';
 import { ToolExecutor } from '../agents/toolExecutor';
 import { buildSystemPrompt } from '../agents/prompts';
 import { AgentDefinition, ToolName } from '../agents/types';
 import { AGENTS, GENERAL_AGENT } from '../agents/registry';
 import { getApprovalMode, isAutoApprove, ApprovalMode } from '../agents/approvalMode';
 import { ROUTER_CONTEXT_TURNS } from '../agents/router';
-import { routeOrPlan, StagePlan } from '../agents/planner';
+import { routeOrPlan, reviseStagesWithComments, StagePlan } from '../agents/planner';
+import { writePlanFile, updatePlanFile, appendPlanDecision, parsePlanComments, deriveTitle } from '../agents/planStore';
 import {
   TouchedFile, VerificationOutcome, classifyTouchedFile, buildVerificationPlan,
   VERIFY_MAX_ROUNDS, VERIFY_FIX_STEP_BUDGET, migrateCmd
@@ -108,6 +111,13 @@ export class ChatPanel {
   private activeSkillContext = '';
   private schemaMap: { doctypes: string[], apps: string[] } | null = null;
   private pendingApproval: { resolve: (approved: boolean) => void } | null = null;
+  /** Gates a multi-stage plan before ANY of its stages start — kept separate
+   *  from pendingApproval (already overloaded between per-tool approval and
+   *  the run-verification gate via the same toolApproved/toolRejected
+   *  messages) so a third overloaded use doesn't risk the two colliding.
+   *  Unlike pendingApproval, nothing here ever checks isAutoApprove() — this
+   *  gate is intentionally mode-independent, see requirePlanApproval(). */
+  private pendingPlanApproval: { resolve: (result: 'approved' | 'rejected' | 'revise') => void } | null = null;
   private pendingClarification: { resolve: (answers: string) => void } | null = null;
   private pendingOAuthResolver: ((code: string) => void) | null = null;
   private activeModel: string = '';
@@ -326,6 +336,29 @@ export class ChatPanel {
           this.say('agentState', { state: 'running' });
           this.pendingApproval.resolve(false);
           this.pendingApproval = null;
+        }
+        break;
+      case 'planApproved':
+        if (this.pendingPlanApproval) {
+          this.say('agentState', { state: 'running' });
+          this.pendingPlanApproval.resolve('approved');
+          this.pendingPlanApproval = null;
+        }
+        break;
+      case 'planRejected':
+        if (this.pendingPlanApproval) {
+          this.say('agentState', { state: 'running' });
+          this.pendingPlanApproval.resolve('rejected');
+          this.pendingPlanApproval = null;
+        }
+        break;
+      case 'planRevise':
+        // Stays 'paused' rather than 'running' — revision is resolved and
+        // re-shown as a fresh approval card in the same paused state, not
+        // handed off to the agent loop.
+        if (this.pendingPlanApproval) {
+          this.pendingPlanApproval.resolve('revise');
+          this.pendingPlanApproval = null;
         }
         break;
       case 'openFile':
@@ -656,22 +689,53 @@ export class ChatPanel {
       return;
     }
 
-    // Extract text
+    // Extract text (+ any embedded diagram images, for PDFs — see fileReader.ts)
     this.chat('system', '📄 Extracting text from ' + fileName + '...');
-    let fileContent: string;
+    let intake: Awaited<ReturnType<typeof readIntakeFile>>;
     try {
-      const intake = await readIntakeFile(filePath);
-      fileContent = intake.content;
-      this.chat('system', '📖 ' + fileContent.length.toLocaleString() + ' characters extracted');
+      intake = await readIntakeFile(filePath);
+      this.chat('system', '📖 ' + intake.content.length.toLocaleString() + ' characters extracted' +
+        (intake.images?.length ? `, ${intake.images.length} diagram/image(s) found` : ''));
     } catch (e: any) {
       this.chat('error', 'Failed to read file: ' + e.message);
       return;
     }
 
-    // Build the user message: file content + user prompt
-    const userMsg = '**File: ' + fileName + '**\n```\n' + fileContent.slice(0, 50000) + '\n```' +
-      (fileContent.length > 50000 ? '\n\n*(file truncated to 50000 chars)*' : '') +
-      (userPrompt ? '\n\n**Task:** ' + userPrompt : '');
+    const attachedImages = intake.images?.map(i => i.image);
+
+    // Small document: fits in one model call — send as-is (no truncation
+    // needed, no chunk/reader/merger overhead) but still attach any
+    // extracted images so diagrams aren't silently dropped.
+    if (intake.content.length <= MAX_CHUNK_CHARS) {
+      const userMsg = '**File: ' + fileName + '**\n```\n' + intake.content + '\n```' +
+        (userPrompt ? '\n\n**Task:** ' + userPrompt : '');
+      await this.runOrchestrator(userMsg, attachedImages);
+      return;
+    }
+
+    // Large document: run it through the chunk/reader/merger pipeline instead
+    // of hard-truncating — each chunk's reader sees a running memory of
+    // entities found in earlier chunks (so cross-section connections aren't
+    // lost) plus that chunk's own page-range images, and the merger
+    // explicitly reasons about relationships spanning sections.
+    const chunks = intake.pageTexts
+      ? splitPagesIntoChunks(intake.pageTexts, fileName)
+      : splitContent(intake.content, fileName);
+
+    this.chat('system', `📚 Document is large (${intake.content.length.toLocaleString()} chars) — analyzing in ${chunks.length} section(s)...`);
+    let lastProgressMsg = '';
+    const { merged } = await extractContent(this.provider, this.activeModel || undefined, chunks, {
+      images: intake.images,
+      onProgress: (p) => {
+        if (p.message && p.message !== lastProgressMsg) {
+          lastProgressMsg = p.message;
+          this.chat('system', `${p.phase === 'merging' ? '🧩' : '🔎'} ${p.message}`);
+        }
+      },
+    });
+
+    const userMsg = renderMergedUnderstandingAsMarkdown(merged, fileName) +
+      (userPrompt ? `\n\n**Task:** ${userPrompt}` : '');
 
     await this.runOrchestrator(userMsg);
   }
@@ -680,6 +744,20 @@ export class ChatPanel {
     this.say('agentState', { state: 'paused' });
     return new Promise((resolve) => {
       this.pendingApproval = { resolve };
+    });
+  }
+
+  /** Blocks until the user approves or rejects a multi-stage plan — fired
+   *  once, before stage 1 starts, regardless of the ask/auto approval-mode
+   *  setting (that setting only governs individual high-risk tool calls
+   *  *inside* a stage once the plan is already running; it says nothing
+   *  about whether the plan itself should run at all). This is what makes
+   *  "plan needs approval even in auto mode" true. */
+  private async requirePlanApproval(payload: { stages: { agentId: string; label: string; icon: string; task: string }[]; planPath: string | null; planFileUri: string | null }): Promise<'approved' | 'rejected' | 'revise'> {
+    this.say('planApprovalRequired', payload);
+    this.say('agentState', { state: 'paused' });
+    return new Promise((resolve) => {
+      this.pendingPlanApproval = { resolve };
     });
   }
 
@@ -801,21 +879,8 @@ export class ChatPanel {
     this.say('userPromptStarted', { promptId });
 
     if (isFirstMessage) {
-      let firstLine = userMessage.split('\n')[0].trim();
-      const mentionIdx = firstLine.indexOf('### Code Mention:');
-      if (mentionIdx !== -1) {
-        firstLine = firstLine.substring(0, mentionIdx).trim();
-      }
-      firstLine = firstLine.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
-      firstLine = firstLine.replace(/[*_`#]/g, '').trim();
-
-      let autoName = firstLine;
-      if (autoName.length > 30) {
-        autoName = autoName.slice(0, 30) + '...';
-      }
-      if (!autoName) {
-        autoName = 'Session ' + (this.sessionManager.sessions.length + 1);
-      }
+      const title = deriveTitle(userMessage, 30);
+      const autoName = title === 'plan' ? 'Session ' + (this.sessionManager.sessions.length + 1) : title;
       this.sessionManager.renameSession(session.id, autoName);
     }
 
@@ -827,7 +892,7 @@ export class ChatPanel {
         const route = await routeOrPlan(this.provider, userMessage, recentHistory, AGENTS);
 
         if (route.kind === 'plan' && route.stages && route.stages.length > 1) {
-          await this.runFeaturePipeline(route.stages, session, userMessage, promptId);
+          await this.runApprovedPipeline(route.stages, session, userMessage, promptId);
         } else {
           const agentId = route.kind === 'single' ? route.agentId! : route.stages?.[0]?.agentId ?? 'general';
           const agent = AGENTS.find(a => a.id === agentId) || GENERAL_AGENT;
@@ -901,17 +966,85 @@ export class ChatPanel {
     }
   }
 
+  /** Resolves a StagePlan's bare agentId into the display shape the plan-
+   *  approval card and the (now-retired) featurePlan event both used. */
+  private toDisplayStages(stages: StagePlan[]): { agentId: string; label: string; icon: string; task: string }[] {
+    return stages.map(s => {
+      const agent = AGENTS.find(a => a.id === s.agentId) || GENERAL_AGENT;
+      return { agentId: agent.id, label: agent.label, icon: agent.icon, task: s.task };
+    });
+  }
+
+  /** Gate in front of runFeaturePipeline: writes the plan durably to
+   *  .frappe-copilot/plans/, then blocks on approval — regardless of the
+   *  ask/auto approval-mode setting, see requirePlanApproval — before ANY
+   *  stage is allowed to start. Loops on a 'revise' decision: reads back
+   *  whatever `COMMENT:` lines the user added under a stage in the plan
+   *  file (see planStore.parsePlanComments), asks the model for an updated
+   *  stage list from just that feedback, rewrites the same plan file with a
+   *  bumped revision counter, and re-shows the approval card — until the
+   *  user actually approves or rejects. Only ever calls runFeaturePipeline
+   *  (the real execution) once approved. */
+  private async runApprovedPipeline(initialStages: StagePlan[], session: Session, userMessage: string, promptId?: string): Promise<void> {
+    let stages = initialStages;
+    const title = deriveTitle(userMessage);
+    const planRecord = writePlanFile({
+      kind: 'pipeline',
+      title,
+      sessionId: session.id,
+      sessionName: session.name,
+      promptId,
+      stages: this.toDisplayStages(stages),
+    });
+    let revision = 0;
+    const planFileUri = planRecord ? vscode.Uri.file(planRecord.absPath).toString() : null;
+
+    while (true) {
+      const decision = await this.requirePlanApproval({ stages: this.toDisplayStages(stages), planPath: planRecord?.relPath ?? null, planFileUri });
+
+      if (decision === 'revise') {
+        if (!planRecord) {
+          this.chat('system', '⚠️ Can\'t revise — the plan file couldn\'t be saved (no workspace open?). Approve or reject to continue.');
+          continue;
+        }
+        const comments = parsePlanComments(planRecord.absPath);
+        if (comments.length === 0) {
+          this.chat('system', 'ℹ️ No `COMMENT:` lines found in the plan file — add one directly below the stage you want changed, save the file, then click **Revise from comments** again.');
+          continue;
+        }
+        this.chat('system', `🔄 Revising plan from ${comments.length} comment(s)...`);
+        const revisedStages = await reviseStagesWithComments(this.provider, stages, comments, AGENTS);
+        if (!revisedStages) {
+          this.chat('system', '⚠️ Revision failed (unparseable model response) — showing the plan unchanged.');
+          continue;
+        }
+        stages = revisedStages;
+        revision++;
+        updatePlanFile(planRecord, { title, sessionId: session.id, sessionName: session.name, promptId, stages: this.toDisplayStages(stages) }, revision);
+        continue;
+      }
+
+      const approved = decision === 'approved';
+      if (planRecord) appendPlanDecision(planRecord.absPath, approved ? 'approved' : 'rejected');
+      if (!approved) {
+        this.chat('system', `🚫 Plan rejected — no stages started.${planRecord ? ` (Saved at \`${planRecord.relPath}\`.)` : ''}`);
+        return;
+      }
+      await this.runFeaturePipeline(stages, session, userMessage, promptId);
+      return;
+    }
+  }
+
   /** Runs an ordered multi-stage plan (see routeOrPlan) sequentially: each
    *  stage is a full runAgentLoop call for its specialist, chained on the same
    *  cosmetic graph (resetGraph only on the first stage) and verified before
    *  the next stage starts. Stops — rather than building further stages on a
    *  broken foundation — if a stage's verification fails or the stage was
-   *  aborted/errored before completing. */
+   *  aborted/errored before completing. Only ever reached via
+   *  runApprovedPipeline, once the plan has cleared the mandatory approval
+   *  gate — this function itself has no approval logic of its own. */
   private async runFeaturePipeline(stages: StagePlan[], session: Session, userMessage: string, promptId?: string): Promise<void> {
     const resolved = stages.map(s => ({ agent: AGENTS.find(a => a.id === s.agentId) || GENERAL_AGENT, task: s.task }));
-    this.say('featurePlan', {
-      stages: resolved.map(s => ({ agentId: s.agent.id, label: s.agent.label, icon: s.agent.icon, task: s.task }))
-    });
 
     let precedingRunId: string | undefined;
     for (let i = 0; i < resolved.length; i++) {
@@ -1065,6 +1198,27 @@ export class ChatPanel {
       summaryText += `\n\n${verification.missingTestNotes.map(n => `_${n}_`).join('\n')}`;
     }
 
+    // The architecture agent's whole job is to produce a plan, not a diff —
+    // it has no write/execute tools, so there's nothing to gate before
+    // "coding" the way the multi-stage pipeline gate works. But its output
+    // is exactly the kind of plan the user shouldn't have to re-derive from
+    // scratch next session, so it gets the same durable .md treatment.
+    let planPath: string | undefined;
+    if (agent.id === 'architecture' && done && summaryText.trim()) {
+      const record = writePlanFile({
+        kind: 'architecture',
+        title: deriveTitle(userMessage),
+        sessionId: session.id,
+        sessionName: session.name,
+        promptId: opts.promptId,
+        body: summaryText,
+      });
+      if (record) {
+        planPath = record.relPath;
+        summaryText += `\n\n---\n📄 Plan saved to \`${record.relPath}\``;
+      }
+    }
+
     if (summaryText.trim()) {
       this.sessionManager.appendMessage(session.id, {
         role: 'assistant',
@@ -1072,7 +1226,8 @@ export class ChatPanel {
         agentId: agent.id,
         runId,
         hasCheckpoint: checkpoint.length > 0,
-        promptId: opts.promptId
+        promptId: opts.promptId,
+        ...(planPath ? { planPath } : {})
       });
     }
     this.sessionManager.writeRunTranscript(session.id, runId, localHistory);

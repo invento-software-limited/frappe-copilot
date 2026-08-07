@@ -1198,16 +1198,58 @@ window.onerror = function(message, source, lineno, colno, error) {
     appendToChat(d);
   }
 
-  function showFeaturePlan(m) {
+  /** Shows a multi-stage plan AND gates it — no stage runs until the user
+   *  clicks Approve here, regardless of the auto/ask approval-mode setting
+   *  (that setting only governs individual tool calls once a stage is
+   *  already running). Replaces the old purely-informational featurePlan
+   *  card, which fired unconditionally with no gate. */
+  function showPlanApproval(m) {
     var d=document.createElement('div');
-    d.className='msg system-msg feature-plan-msg';
+    d.className='msg system-msg plan-approval-msg';
     var items = (m.stages||[]).map(function(s){
       return '<li>'+esc(s.icon||'')+' <strong>'+esc(s.label)+'</strong> — '+esc(s.task)+'</li>';
     }).join('');
+    var fileLine = m.planPath
+      ? '<div class="verify-card-desc plan-file-link">📄 '+esc(m.planPath)+'</div>'
+      : '';
     d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
-      '<div class="verify-card-title">🧭 Feature plan ('+(m.stages||[]).length+' stage(s))</div>' +
-      '<ol class="feature-plan-list">'+items+'</ol></div>';
+      '<div class="verify-card">' +
+        '<div class="verify-card-title">🧭 Plan ('+(m.stages||[]).length+' stage(s)) — review before running</div>' +
+        '<ol class="feature-plan-list">'+items+'</ol>' +
+        fileLine +
+        '<div class="verify-card-desc">To request a change to one stage: open the plan file, add a <code>COMMENT:</code> line directly under that stage, save, then click Revise.</div>' +
+        '<div class="tool-btn-container" id="plan-btns">' +
+          '<button class="tool-btn tool-btn-approve" id="plan-approve">✅ Approve &amp; Run</button>' +
+          '<button class="tool-btn" id="plan-revise">🔄 Revise from comments</button>' +
+          '<button class="tool-btn tool-btn-reject" id="plan-reject">Reject</button>' +
+        '</div>' +
+      '</div></div>';
     appendToChat(d);
+    var btns = d.querySelector('#plan-btns');
+    if (m.planFileUri) {
+      var fileLinkEl = d.querySelector('.plan-file-link');
+      if (fileLinkEl) {
+        fileLinkEl.style.cursor = 'pointer';
+        fileLinkEl.title = 'Open plan file';
+        fileLinkEl.onclick = function() { vs.postMessage({ type: 'openFile', uri: m.planFileUri }); };
+      }
+    }
+    d.querySelector('#plan-approve').onclick = function() {
+      btns.style.display = 'none';
+      vs.postMessage({ type: 'planApproved' });
+    };
+    d.querySelector('#plan-revise').onclick = function() {
+      // Buttons hide immediately — a fresh plan-approval card is appended
+      // once the revision completes (or an explanatory system message if
+      // there were no COMMENT: lines to act on), so this card becomes stale
+      // history rather than staying interactive.
+      btns.style.display = 'none';
+      vs.postMessage({ type: 'planRevise' });
+    };
+    d.querySelector('#plan-reject').onclick = function() {
+      btns.style.display = 'none';
+      vs.postMessage({ type: 'planRejected' });
+    };
   }
 
   function showFeatureStage(m, started) {
@@ -2499,7 +2541,7 @@ window.onerror = function(message, source, lineno, colno, error) {
       case 'runTranscript': renderRunTranscript(m.runId, m.entries); break;
       case 'verifyApprovalRequired': showVerifyApproval(m); break;
       case 'verifyResult': showVerifyResult(m); break;
-      case 'featurePlan': showFeaturePlan(m); break;
+      case 'planApprovalRequired': showPlanApproval(m); break;
       case 'featureStageStarted': showFeatureStage(m, true); break;
       case 'featureStageFinished': showFeatureStage(m, false); break;
       case 'runReverted':
@@ -3252,28 +3294,38 @@ window.onerror = function(message, source, lineno, colno, error) {
     var lines = text.split('\n');
     var items = [];
     var currentItem = null;
+    var MULTI_RE = /\s*\(\s*multi[-\s]?select[^)]*\)\s*$/i;
+    var RECOMMENDED_RE = /\s*\(\s*recommended\s*\)\s*$/i;
 
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim();
       if (!line) continue;
 
       var isBullet = /^[*-]\s+/.test(line);
-      
+
       if (isBullet) {
         var optionText = line.replace(/^[*-]\s+/, '').trim();
+        var recommended = RECOMMENDED_RE.test(optionText);
+        optionText = optionText.replace(RECOMMENDED_RE, '').trim();
+        var isOther = /^other\b/i.test(optionText);
+        var opt = { label: optionText, recommended: recommended, isOther: isOther };
         if (currentItem) {
-          currentItem.options.push(optionText);
+          currentItem.options.push(opt);
         } else {
           items.push({
             question: optionText,
-            options: []
+            options: [],
+            multiSelect: false
           });
         }
       } else {
         var cleanQ = line.replace(/^\d+[\.\)]\s*/, '').replace(/^Q\d+[:\.]\s*/i, '').trim();
+        var multiSelect = MULTI_RE.test(cleanQ);
+        cleanQ = cleanQ.replace(MULTI_RE, '').trim();
         currentItem = {
           question: cleanQ,
-          options: []
+          options: [],
+          multiSelect: multiSelect
         };
         items.push(currentItem);
       }
@@ -3307,15 +3359,40 @@ window.onerror = function(message, source, lineno, colno, error) {
       container.appendChild(textDiv);
 
       if (item.options.length > 0) {
+        if (item.multiSelect) {
+          var hint = document.createElement('span');
+          hint.textContent = 'Select all that apply';
+          hint.style.fontSize = '11px';
+          hint.style.fontStyle = 'italic';
+          hint.style.color = 'var(--vscode-descriptionForeground,#888)';
+          container.appendChild(hint);
+        }
+
         var optionsContainer = document.createElement('div');
         optionsContainer.style.display = 'flex';
         optionsContainer.style.flexDirection = 'column';
         optionsContainer.style.gap = '8px';
         optionsContainer.style.marginTop = '4px';
-        optionsContainer.className = 'clarification-input-group';
+        optionsContainer.className = item.multiSelect ? 'clarification-checkbox-group' : 'clarification-input-group';
         optionsContainer.setAttribute('data-question', item.question);
-        
+        optionsContainer.setAttribute('data-multi', item.multiSelect ? '1' : '0');
+
+        // Recommended pre-selection: highlight the flagged option and default
+        // it into the selected state, same as every other option otherwise
+        // defaulting to nothing (multi-select) or the first entry (single-select).
+        var recommendedIdx = -1;
+        for (var ri = 0; ri < item.options.length; ri++) {
+          if (item.options[ri].recommended) { recommendedIdx = ri; break; }
+        }
+
+        var otherInput = null;
+
         item.options.forEach(function(opt, optIndex) {
+          var optRow = document.createElement('div');
+          optRow.style.display = 'flex';
+          optRow.style.flexDirection = 'column';
+          optRow.style.gap = '6px';
+
           var optLabel = document.createElement('label');
           optLabel.style.display = 'flex';
           optLabel.style.alignItems = 'center';
@@ -3323,23 +3400,75 @@ window.onerror = function(message, source, lineno, colno, error) {
           optLabel.style.fontSize = '12px';
           optLabel.style.cursor = 'pointer';
           optLabel.style.color = 'var(--vscode-editor-foreground,#d4d4d4)';
-          
-          var radio = document.createElement('input');
-          radio.type = 'radio';
-          radio.name = 'q-' + index;
-          radio.value = opt;
-          radio.className = 'clarification-radio';
-          radio.style.cursor = 'pointer';
-          if (optIndex === 0) radio.checked = true;
-          
+          optLabel.style.padding = '5px 8px';
+          optLabel.style.borderRadius = '6px';
+          optLabel.style.border = '1px solid ' + (opt.recommended ? 'rgba(255,152,0,0.5)' : 'transparent');
+          optLabel.style.background = opt.recommended ? 'rgba(255,152,0,0.08)' : 'transparent';
+
+          var input = document.createElement('input');
+          input.type = item.multiSelect ? 'checkbox' : 'radio';
+          input.name = 'q-' + index;
+          input.value = opt.label;
+          input.className = item.multiSelect ? 'clarification-checkbox' : 'clarification-radio';
+          input.style.cursor = 'pointer';
+          if (opt.isOther) input.setAttribute('data-other', '1');
+          if (!item.multiSelect && recommendedIdx === -1 && optIndex === 0) input.checked = true;
+          if (optIndex === recommendedIdx) input.checked = true;
+
           var span = document.createElement('span');
-          span.textContent = opt;
-          
-          optLabel.appendChild(radio);
+          span.textContent = opt.label;
+          span.style.flex = '1';
+
+          optLabel.appendChild(input);
           optLabel.appendChild(span);
-          optionsContainer.appendChild(optLabel);
+
+          if (opt.recommended) {
+            var badge = document.createElement('span');
+            badge.textContent = 'Recommended';
+            badge.style.fontSize = '10px';
+            badge.style.fontWeight = '600';
+            badge.style.color = '#ff9800';
+            badge.style.border = '1px solid rgba(255,152,0,0.5)';
+            badge.style.borderRadius = '10px';
+            badge.style.padding = '1px 7px';
+            badge.style.flexShrink = '0';
+            optLabel.appendChild(badge);
+          }
+
+          optRow.appendChild(optLabel);
+
+          if (opt.isOther) {
+            otherInput = document.createElement('input');
+            otherInput.type = 'text';
+            otherInput.placeholder = 'Please specify...';
+            otherInput.className = 'clarification-other-input';
+            otherInput.style.background = 'var(--vscode-input-background,#3c3c3c)';
+            otherInput.style.color = 'var(--vscode-input-foreground,#d4d4d4)';
+            otherInput.style.border = '1px solid var(--vscode-input-border,#555)';
+            otherInput.style.borderRadius = '6px';
+            otherInput.style.padding = '6px 10px';
+            otherInput.style.fontFamily = 'inherit';
+            otherInput.style.fontSize = '12px';
+            otherInput.style.outline = 'none';
+            otherInput.style.marginLeft = '24px';
+            otherInput.style.display = input.checked ? 'block' : 'none';
+            optRow.appendChild(otherInput);
+
+            var syncOther = function() {
+              otherInput.style.display = input.checked ? 'block' : 'none';
+              if (input.checked) setTimeout(function() { otherInput.focus(); }, 50);
+            };
+            input.addEventListener('change', syncOther);
+            // Radios in the same group need every sibling's change to re-check
+            // this one's state too, since only the newly-checked radio fires.
+            if (!item.multiSelect) {
+              optionsContainer.addEventListener('change', syncOther);
+            }
+          }
+
+          optionsContainer.appendChild(optRow);
         });
-        
+
         container.appendChild(optionsContainer);
       } else {
         var textarea = document.createElement('textarea');
@@ -3400,7 +3529,48 @@ window.onerror = function(message, source, lineno, colno, error) {
       var q = group.getAttribute('data-question');
       var selectedRadio = group.querySelector('input.clarification-radio:checked');
       var val = selectedRadio ? selectedRadio.value : '';
+      if (selectedRadio && selectedRadio.hasAttribute('data-other')) {
+        var otherInp = group.querySelector('.clarification-other-input');
+        var otherVal = otherInp ? otherInp.value.trim() : '';
+        if (!otherVal) {
+          allAnswered = false;
+          if (otherInp) otherInp.style.borderColor = 'var(--vscode-errorForeground,#f48771)';
+        } else {
+          val = otherVal;
+        }
+      }
+      if (!selectedRadio) allAnswered = false;
       answers.push({ question: q, answer: val });
+    });
+
+    var checkboxGroups = body.querySelectorAll('.clarification-checkbox-group');
+    checkboxGroups.forEach(function(group) {
+      var q = group.getAttribute('data-question');
+      var checked = group.querySelectorAll('input.clarification-checkbox:checked');
+      var vals = [];
+      var otherIncomplete = false;
+      checked.forEach(function(cb) {
+        if (cb.hasAttribute('data-other')) {
+          var otherInp = group.querySelector('.clarification-other-input');
+          var otherVal = otherInp ? otherInp.value.trim() : '';
+          if (!otherVal) {
+            otherIncomplete = true;
+            if (otherInp) otherInp.style.borderColor = 'var(--vscode-errorForeground,#f48771)';
+          } else {
+            vals.push(otherVal);
+          }
+        } else {
+          vals.push(cb.value);
+        }
+      });
+      if (checked.length === 0 || otherIncomplete) {
+        allAnswered = false;
+        group.style.outline = checked.length === 0 ? '1px solid var(--vscode-errorForeground,#f48771)' : 'none';
+        group.style.borderRadius = '6px';
+      } else {
+        group.style.outline = 'none';
+      }
+      answers.push({ question: q, answer: vals.join(', ') });
     });
     
     if (!allAnswered) {

@@ -11,6 +11,7 @@ const REQUIRED_DIRECTORIES = [
   'sessions',
   'docs',
   'agents',
+  'plans',
 ];
 
 /**
