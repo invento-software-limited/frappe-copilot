@@ -8,6 +8,13 @@ export type McpTransportKind = 'stdio' | 'sse' | 'http';
  *  edit/delete it from our own UI (only 'manual' ones) and how it's badged. */
 export type McpServerSource = 'manual' | 'vscode' | 'claude';
 
+/** Which mcp.json a manual server is persisted in: the workspace-local
+ *  '.frappe-copilot/mcp.json' (this project only) or the global
+ *  '~/.frappe-copilot/mcp.json' (every workspace this extension runs in).
+ *  Only meaningful for source: 'manual' — discovered entries are always
+ *  workspace-scoped, since they come from a workspace file by definition. */
+export type McpServerScope = 'workspace' | 'global';
+
 /** One configured MCP server, persisted in .frappe-copilot/mcp.json (manual
  *  ones) or synthesized on the fly from an external config file (discovered
  *  ones — never written back to our own store). */
@@ -29,6 +36,9 @@ export interface McpServerConfig {
    *  (this extension shouldn't be the one that decides to spawn a process). */
   enabled: boolean;
   source: McpServerSource;
+  /** Manual entries only. Defaults to 'workspace' when absent, so files
+   *  written before this field existed keep behaving exactly as before. */
+  scope?: McpServerScope;
 }
 
 export type McpServerStatus = 'disabled' | 'connecting' | 'connected' | 'error';

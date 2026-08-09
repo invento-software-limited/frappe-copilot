@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.6.0] - 2026-08-09
+
+### Added
+
+- **Global-Scope MCP Servers** — MCP server configs can now be saved with a Global scope (persisted to `~/.frappe-copilot/mcp.json`) in addition to the existing per-workspace scope, and connected automatically regardless of which workspace is open. The "MCP Servers" Webview's Add/Edit form now has a working Scope selector (Workspace/Global) — previously the dropdown existed in the HTML but `buildConfigFromForm()` never read it, so every save silently persisted to the workspace file no matter what was picked.
+
+### Fixed
+
+- **`MCPStore` Never Read a Home-Directory Config** — `readManual()` and related store logic only ever looked at `<workspace_root>/.frappe-copilot/mcp.json`; a server saved directly to `~/.frappe-copilot/mcp.json` was invisible to `MCPManager.initialize()` no matter how many times the window was reloaded. Fixed by adding dual-file read/write (workspace + global) so servers saved to either location are discovered and connected at activation.
+
 ## [1.5.0] - 2026-08-07
 
 ### Added

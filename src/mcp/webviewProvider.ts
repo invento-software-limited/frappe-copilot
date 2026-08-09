@@ -100,10 +100,17 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private sourceBadge(source: McpServerConfig['source']): string {
-    if (source === 'vscode') return '<span class="badge badge-vscode">VS Code</span>';
-    if (source === 'claude') return '<span class="badge badge-claude">.mcp.json</span>';
-    return '<span class="badge badge-manual">Manual</span>';
+  /** For manual entries this doubles as the scope indicator (Global vs
+   *  Workspace) rather than a flat "Manual" label — scope is the thing a
+   *  user actually needs to see at a glance, since it determines which
+   *  mcp.json the entry lives in and whether it follows them to other
+   *  projects. */
+  private sourceBadge(config: McpServerConfig): string {
+    if (config.source === 'vscode') return '<span class="badge badge-vscode">VS Code</span>';
+    if (config.source === 'claude') return '<span class="badge badge-claude">.mcp.json</span>';
+    return config.scope === 'global'
+      ? '<span class="badge badge-global">🌐 Global</span>'
+      : '<span class="badge badge-manual">Workspace</span>';
   }
 
   private renderCard(config: McpServerConfig): string {
@@ -124,7 +131,7 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
       <div class="card-header">
         <span class="status-dot" id="dot-${escapeHtml(config.id)}" title="${status.status}">${this.statusDot(status.status)}</span>
         <span class="server-name">${escapeHtml(config.name)}</span>
-        ${this.sourceBadge(config.source)}
+        ${this.sourceBadge(config)}
         <label class="switch" title="Enable / disable">
           <input type="checkbox" ${config.enabled ? 'checked' : ''} onchange="toggleServer('${escapeHtml(config.id)}', this.checked)">
           <span class="slider"></span>
@@ -193,6 +200,7 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
   .server-name { font-weight: 700; font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .badge { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; color: #fff; text-transform: uppercase; }
   .badge-manual { background: #10b981; }
+  .badge-global { background: #f59e0b; }
   .badge-vscode { background: #3b82f6; }
   .badge-claude { background: #8b5cf6; }
   .server-summary { font-family: var(--vscode-editor-font-family, monospace); font-size: 10px; color: var(--text-muted); word-break: break-all; }
@@ -229,7 +237,7 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
 </style>
 </head>
 <body>
-  <div class="hint">Local (stdio) servers run a command you already trust on this machine. Remote servers connect over HTTP/SSE. Servers discovered from <code>.vscode/mcp.json</code> or <code>.mcp.json</code> start disabled — flip them on when you're ready to connect.</div>
+  <div class="hint">Local (stdio) servers run a command you already trust on this machine. Remote servers connect over HTTP/SSE. Servers discovered from <code>.vscode/mcp.json</code> or <code>.mcp.json</code> start disabled — flip them on when you're ready to connect. Choose <b>Workspace</b> scope to keep a server specific to this project, or <b>Global</b> to make it available in every Frappe Copilot workspace (<code>~/.frappe-copilot/mcp.json</code>).</div>
 
   <div class="top-actions">
     <button class="btn" onclick="openAddForm('stdio')">➕ Local Server</button>
@@ -243,6 +251,12 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
     <input type="hidden" id="f-id" value="">
     <label>Name</label>
     <input type="text" id="f-name" placeholder="e.g. Figma, Postgres">
+
+    <label>Scope</label>
+    <select id="f-scope" style="width:100%;padding:6px 8px;background:var(--bg-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:4px;font-size:11px;">
+      <option value="workspace">Workspace (this project only)</option>
+      <option value="global">Global (every workspace)</option>
+    </select>
 
     <label>Transport</label>
     <select id="f-transport" onchange="onTransportChange()" style="width:100%;padding:6px 8px;background:var(--bg-color);color:var(--text-color);border:1px solid var(--border-color);border-radius:4px;font-size:11px;">
@@ -286,6 +300,7 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
     function openAddForm(transport) {
       document.getElementById('f-id').value = '';
       document.getElementById('f-name').value = '';
+      document.getElementById('f-scope').value = 'workspace';
       document.getElementById('f-command').value = '';
       document.getElementById('f-args').value = '';
       document.getElementById('f-env').value = '';
@@ -300,6 +315,7 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
     function openEditForm(config) {
       document.getElementById('f-id').value = config.id;
       document.getElementById('f-name').value = config.name || '';
+      document.getElementById('f-scope').value = config.scope || 'workspace';
       document.getElementById('f-transport').value = config.transport;
       document.getElementById('f-command').value = config.command || '';
       document.getElementById('f-args').value = (config.args || []).join(' ');
@@ -342,7 +358,8 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
     function buildConfigFromForm() {
       const transport = document.getElementById('f-transport').value;
       const name = document.getElementById('f-name').value.trim();
-      const base = { name, transport, enabled: true };
+      const scope = document.getElementById('f-scope').value;
+      const base = { name, transport, scope, enabled: true };
       if (transport === 'stdio') {
         const args = document.getElementById('f-args').value.trim();
         return Object.assign(base, {
