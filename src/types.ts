@@ -79,6 +79,13 @@ export interface ChatResponse {
     cacheReadTokens?: number;
     cacheWriteTokens?: number;
   };
+  /** Set on the final chunk of a stream (or the one-shot chat() response) when
+   *  the provider cut the turn off because it hit its output-token ceiling —
+   *  distinct from the model naturally finishing. Without this, a response
+   *  truncated mid-thinking or mid-prose (no dangling tool-call tag to detect)
+   *  is indistinguishable from a complete answer and the agent loop silently
+   *  ends the run with a chopped-off reply. See ChatPanel.runOneAgentStep. */
+  truncated?: boolean;
 }
 
 /** Provider interface — all LLM providers implement this. */

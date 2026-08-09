@@ -47,6 +47,14 @@ const MAX_CONSECUTIVE_MALFORMED_TOOL_CALLS = 5;
  *  still ends the run rather than spinning forever. */
 const MAX_CONSECUTIVE_STREAM_ERRORS = 5;
 
+/** A response cut off by the provider's own output-token ceiling (see
+ *  ChatResponse.truncated) is re-prompted with "continue" rather than ended —
+ *  see the truncated-response check in runOneAgentStep. Bounded the same way
+ *  as the other retry loops in this file so a model/config combo that always
+ *  gets cut off (e.g. a thinking budget that leaves no room for the reply)
+ *  gives up and says so instead of looping forever. */
+const MAX_CONSECUTIVE_TRUNCATIONS = 5;
+
 /** The image formats every vision-capable provider here accepts. An extension
  *  outside this map falls through to the text-extraction path. */
 const IMAGE_MEDIA_TYPES: Record<string, string> = {
@@ -999,7 +1007,7 @@ export class ChatPanel {
     }
 
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    const loopState = { malformedCount: 0, streamErrorCount: 0 };
+    const loopState = { malformedCount: 0, streamErrorCount: 0, truncatedCount: 0 };
 
     // Auto-load the skills this request obviously calls for, once per run. Doing
     // it here rather than per-step keeps the system prompt byte-identical across
@@ -1098,7 +1106,7 @@ export class ChatPanel {
     runId: string,
     root: string,
     stepLabel: string,
-    loopState: { malformedCount: number; streamErrorCount: number }
+    loopState: { malformedCount: number; streamErrorCount: number; truncatedCount: number }
   ): Promise<AgentStepResult> {
     let ragContext = '';
     if (this.vectorStore) {
@@ -1159,10 +1167,12 @@ export class ChatPanel {
 
     let fullContent = '';
     let fullReasoning = '';
+    let truncated = false;
     try {
       const streamed = await this.stream(messages, runId);
       fullContent = streamed.content;
       fullReasoning = streamed.reasoning;
+      truncated = streamed.truncated;
     } catch (e: any) {
       loopState.streamErrorCount++;
       if (loopState.streamErrorCount > MAX_CONSECUTIVE_STREAM_ERRORS) {
@@ -1218,6 +1228,29 @@ export class ChatPanel {
         });
         return { done: false, assistantText: fullContent, stopLoop: false };
       }
+
+      // The provider can also cut a turn off mid-*thinking* or mid-*prose*
+      // reply — no dangling tool-call tag for the check above to catch, since
+      // there was no tool call in progress at all. Without this, that
+      // half-finished text (see ChatResponse.truncated) reads as a genuine,
+      // complete answer and the run ends right there — the exact "it just
+      // stops" symptom this check exists to close off.
+      if (truncated) {
+        loopState.truncatedCount++;
+        if (loopState.truncatedCount > MAX_CONSECUTIVE_TRUNCATIONS) {
+          return {
+            done: true,
+            stopLoop: true,
+            assistantText: `${fullContent}\n\n---\n**Stopped:** the response kept getting cut off by the output-length limit ${loopState.truncatedCount} times in a row before finishing. Try a shorter request, a lower extended-thinking budget, or a model with a larger output limit.`
+          };
+        }
+        localHistory.push({
+          role: 'user',
+          content: 'Your previous response was cut off by the output length limit before finishing (no tool call was in progress). Continue your answer from where it left off.'
+        });
+        return { done: false, assistantText: fullContent, stopLoop: false };
+      }
+      loopState.truncatedCount = 0;
 
       // A model can drift into some other tool-invocation syntax instead of the
       // "<tool_call name=...>" format this app's tool loop actually parses:
@@ -1489,7 +1522,7 @@ export class ChatPanel {
     let roundsUsed = 0;
     let lastError = '';
     let passed = false;
-    const loopState = { malformedCount: 0, streamErrorCount: 0 };
+    const loopState = { malformedCount: 0, streamErrorCount: 0, truncatedCount: 0 };
 
     for (let round = 0; round <= VERIFY_MAX_ROUNDS && !passed; round++) {
       roundsUsed = round + 1;
@@ -1550,9 +1583,11 @@ export class ChatPanel {
   /** Returns the visible reply *and* the thinking stream. Callers need both:
    *  with extended thinking on, the model sometimes emits a whole <tool_call>
    *  block inside its thinking instead of the reply, and that call still has
-   *  to be found and executed (see runOneAgentStep). */
-  private async stream(msgs: { role: string; content: string }[], runId?: string): Promise<{ content: string; reasoning: string }> {
-    var full = '', fullReasoning = '', id = '' + Date.now();
+   *  to be found and executed (see runOneAgentStep). `truncated` is set when
+   *  any chunk reported the provider cut the turn off at its output-token
+   *  ceiling — see ChatResponse.truncated and the caller's handling of it. */
+  private async stream(msgs: { role: string; content: string }[], runId?: string): Promise<{ content: string; reasoning: string; truncated: boolean }> {
+    var full = '', fullReasoning = '', truncated = false, id = '' + Date.now();
     this.postWebviewMessage({ type: 'startStream', messageId: id });
     try {
       const options: any = { maxTokens: 8192 };
@@ -1571,16 +1606,17 @@ export class ChatPanel {
         }
         full += c.content;
         fullReasoning += c.reasoning || '';
-        this.postWebviewMessage({ 
-          type: 'streamChunk', 
-          messageId: id, 
+        if (c.truncated) truncated = true;
+        this.postWebviewMessage({
+          type: 'streamChunk',
+          messageId: id,
           chunk: c.content,
           reasoning: c.reasoning || ''
         });
       }
     } catch (e) { this.postWebviewMessage({ type: 'streamError', messageId: id, error: String(e) }); throw e; }
     this.postWebviewMessage({ type: 'endStream', messageId: id, fullContent: full, fullReasoning: fullReasoning });
-    return { content: full, reasoning: fullReasoning };
+    return { content: full, reasoning: fullReasoning, truncated };
   }
 
   private postWebviewMessage(msg: any) {

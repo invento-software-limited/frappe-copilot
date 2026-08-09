@@ -212,12 +212,24 @@ export class SkillsStore {
     }
 
     for (const root of this.skillRoots()) {
-      const flat = path.join(root, `${id}.md`);
-      if (fs.existsSync(flat)) return { filePath: flat, skillId: id };
+      const base = path.resolve(root);
 
-      const dir = path.join(root, id);
-      if (this.bundleEntryPath(dir)) {
-        return { filePath: this.bundleEntryPath(dir)!, bundleDir: dir, skillId: id };
+      const flat = path.resolve(base, `${id}.md`);
+      // Unlike resolveBundleFile below, this had no containment check at
+      // all — an id like '../../../../some/other/project/README' would
+      // happily resolve outside the skills directory entirely and read
+      // whatever '.md' file (or SKILL.md-shaped bundle dir) it landed on.
+      // `use_skill`'s id comes straight from the model, so this needs the
+      // same boundary check every other path-resolving lookup in this file
+      // already has.
+      if (flat.startsWith(base + path.sep) && fs.existsSync(flat)) {
+        return { filePath: flat, skillId: id };
+      }
+
+      const dir = path.resolve(base, id);
+      if (dir.startsWith(base + path.sep)) {
+        const entry = this.bundleEntryPath(dir);
+        if (entry) return { filePath: entry, bundleDir: dir, skillId: id };
       }
     }
     return null;

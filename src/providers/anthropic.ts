@@ -432,6 +432,7 @@ export class AnthropicProvider implements LLMProvider {
       content,
       reasoning: reasoning || undefined,
       model: data.model || this.model,
+      truncated: data.stop_reason === 'max_tokens',
       usage: usage ? {
         promptTokens: usage.input_tokens || 0,
         completionTokens: usage.output_tokens || 0,
@@ -562,6 +563,13 @@ export class AnthropicProvider implements LLMProvider {
       const decoder = new TextDecoder();
       let buffer = '';
       let midStreamError: string | null = null;
+      // Anthropic sends `message_delta` with `delta.stop_reason` right before
+      // the stream closes. 'max_tokens' means the turn was cut off, not that
+      // the model finished — without tracking this, a response truncated
+      // mid-thinking or mid-prose (no dangling tool-call tag to catch it) is
+      // indistinguishable from a complete answer, and the agent loop silently
+      // ends the run with a chopped-off reply. See ChatResponse.truncated.
+      let stopReason: string | undefined;
 
       try {
         readLoop:
@@ -597,6 +605,8 @@ export class AnthropicProvider implements LLMProvider {
                   reasoning: chunk.delta.thinking || '',
                   model: modelToUse,
                 };
+              } else if (chunk.type === 'message_delta' && chunk.delta?.stop_reason) {
+                stopReason = chunk.delta.stop_reason;
               } else if (chunk.type === 'message_start' && chunk.message?.usage) {
                 // Surfaces prompt-cache effectiveness for this step: a high
                 // cacheReadTokens relative to input_tokens confirms the cache_control
@@ -617,6 +627,9 @@ export class AnthropicProvider implements LLMProvider {
 
       if (midStreamError) {
         throw new Error(`Anthropic API stream error: ${midStreamError}`);
+      }
+      if (stopReason === 'max_tokens') {
+        yield { content: '', model: modelToUse, truncated: true };
       }
       return;
     }

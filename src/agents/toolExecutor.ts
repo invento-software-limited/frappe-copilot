@@ -87,7 +87,13 @@ export class ToolExecutor {
     let fullPath = path.resolve(activeRoot, relPath);
     fullPath = path.normalize(fullPath);
     const normalizedRoot = path.normalize(activeRoot);
-    if (!fullPath.startsWith(normalizedRoot)) {
+    // A bare startsWith(normalizedRoot) is a broken containment check: it
+    // treats any path that merely shares the root as a *string prefix* as
+    // "inside" it — e.g. root '/home/user/frappe-copilot' would silently
+    // admit '/home/user/frappe-copilot-secrets/config.json' with no warning
+    // at all, since that string does start with the root. Requiring an exact
+    // match or a path-separator boundary closes that off.
+    if (fullPath !== normalizedRoot && !fullPath.startsWith(normalizedRoot + path.sep)) {
       if (isAutoApprove()) return fullPath;
       const choice = await vscode.window.showWarningMessage(
         `Frappe Copilot wants to access file/directory outside the workspace root: '${fullPath}'. Do you allow this?`,
@@ -341,13 +347,6 @@ export class ToolExecutor {
     });
   }
 
-  private escapePath(p: string): string {
-    if (process.platform === 'win32') {
-      return p.includes(' ') ? `"${p}"` : p;
-    }
-    return p.replace(/([^a-zA-Z0-9._/-])/g, '\\$1');
-  }
-
   /** Falls back to config.json's defaultSite when the model didn't pass one
    *  explicitly. Shared by every tool that hits the live site's database. */
   private resolveSite(site?: string): string | null {
@@ -452,9 +451,16 @@ export class ToolExecutor {
       };
     }
 
-    const safeDocType = doctype.replace(/'/g, "\\'");
-    // Single-line python code using single quotes internally so it has no shell escaping issues when wrapped in double quotes
-    const pythonCode = `import frappe, json; m = frappe.get_meta('${safeDocType}'); print(json.dumps({'name': m.name, 'module': m.module, 'issingle': m.issingle, 'istable': m.istable, 'is_submittable': m.is_submittable, 'title_field': m.title_field, 'fields': [{'fieldname': f.fieldname, 'fieldtype': f.fieldtype, 'label': f.label, 'options': f.options, 'reqd': f.reqd, 'in_list_view': f.in_list_view} for f in m.fields], 'links': [{'link_doctype': l.link_doctype, 'link_fieldname': l.link_fieldname, 'group': l.group} for l in getattr(m, 'links', [])], 'states': [{'title': s.title, 'color': s.color} for s in getattr(m, 'states', [])]}, indent=2))`;
+    // Escaping a single quote by hand (as this used to do) is unsafe: it
+    // only handles a literal `'` and never touches backslashes, so a doctype
+    // value ending in a bare `\` still escapes the closing quote it produces
+    // (`'foo\'` reads as an unterminated string in Python), letting whatever
+    // follows in the one-liner be reinterpreted as code — a real code-
+    // injection path since `introspect_doctype` isn't gated by any approval
+    // prompt. Route the value through base64, like every write_* tool below
+    // already does, so no character in it is ever shell/Python-meaningful.
+    const b64 = this.b64Json(doctype);
+    const pythonCode = `import frappe, json, base64; dt = json.loads(base64.b64decode('${b64}').decode('utf-8')); m = frappe.get_meta(dt); print(json.dumps({'name': m.name, 'module': m.module, 'issingle': m.issingle, 'istable': m.istable, 'is_submittable': m.is_submittable, 'title_field': m.title_field, 'fields': [{'fieldname': f.fieldname, 'fieldtype': f.fieldtype, 'label': f.label, 'options': f.options, 'reqd': f.reqd, 'in_list_view': f.in_list_view} for f in m.fields], 'links': [{'link_doctype': l.link_doctype, 'link_fieldname': l.link_fieldname, 'group': l.group} for l in getattr(m, 'links', [])], 'states': [{'title': s.title, 'color': s.color} for s in getattr(m, 'states', [])]}, indent=2))`;
 
     return await this.runPythonOneLiner(activeSite, pythonCode);
   }

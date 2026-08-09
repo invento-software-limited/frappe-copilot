@@ -132,6 +132,7 @@ export class OpenCodeZenProvider implements LLMProvider {
     return {
       content: data.choices[0]?.message?.content || '',
       model: data.model,
+      truncated: data.choices[0]?.finish_reason === 'length',
       usage: data.usage
         ? {
             promptTokens: data.usage.prompt_tokens,
@@ -215,14 +216,22 @@ export class OpenCodeZenProvider implements LLMProvider {
 
             try {
               const chunk = JSON.parse(dataStr) as OpenCodeZenResponse;
-              const deltaObj = chunk.choices[0]?.delta;
+              const choice = chunk.choices[0];
+              const deltaObj = choice?.delta;
               const delta = deltaObj?.content || '';
               const reasoning = (deltaObj as any)?.reasoning_content || '';
-              if (delta || reasoning) {
+              // 'length' means the provider cut the turn off at max_tokens, not
+              // that the model finished — without surfacing this, a response
+              // truncated mid-thinking or mid-prose (no dangling tool-call tag
+              // to catch it) looks like a complete answer and the agent loop
+              // silently ends the run with a chopped-off reply.
+              const truncated = choice?.finish_reason === 'length';
+              if (delta || reasoning || truncated) {
                 yield {
                   content: delta,
                   reasoning: reasoning,
                   model: chunk.model || this.model,
+                  truncated,
                   usage: chunk.usage
                     ? {
                         promptTokens: chunk.usage.prompt_tokens,

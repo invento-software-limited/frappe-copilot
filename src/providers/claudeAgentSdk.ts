@@ -326,6 +326,15 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     let sawTextDelta = false;
     let errorMessage: string | undefined;
     let sessionId: string | undefined = resume;
+    // The underlying stream_event payloads mirror the raw Anthropic Messages
+    // API, which sends a `message_delta` with `delta.stop_reason` right
+    // before the turn ends. 'max_tokens' means this call's reply was cut off
+    // by the output-token ceiling, not that the model finished — without
+    // this, a response truncated mid-thinking or mid-prose (no dangling
+    // tool-call tag for the caller to catch) reads as a complete answer and
+    // the agent loop silently ends the run with a chopped-off reply. See
+    // ChatResponse.truncated and ChatPanel.runOneAgentStep.
+    let stopReason: string | undefined;
 
     try {
       const stream = sdk.query({
@@ -348,6 +357,8 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
             } else if (event.delta?.type === 'thinking_delta') {
               yield { content: '', reasoning: event.delta.thinking || '', model: modelToUse };
             }
+          } else if (event?.type === 'message_delta' && event.delta?.stop_reason) {
+            stopReason = event.delta.stop_reason;
           }
         } else if (m.type === 'system' && m.subtype === 'api_retry') {
           options?.onRetry?.(
@@ -375,6 +386,9 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     this.recordCheckpoint(options?.runId, sessionId, messages);
     if (resultText) {
       yield { content: resultText, model: modelToUse };
+    }
+    if (stopReason === 'max_tokens') {
+      yield { content: '', model: modelToUse, truncated: true };
     }
   }
 
