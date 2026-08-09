@@ -29,14 +29,37 @@ If the request doesn't clearly fit a specialist, or spans multiple specialists e
 AGENT_ID: general`;
 }
 
+/** Per-turn character budgets for the router/planner's view of the transcript.
+ *  A flat 300-char head-only cut was too aggressive: an assistant turn here is
+ *  a whole run's summary, and the part that resolves a follow-up ("created
+ *  `apps/x/.../sales_visit.json`", "left the permission rule as a TODO") is in
+ *  its closing lines, not its opening ones. Losing that made "now add a
+ *  validation to that doctype" route to whichever agent the bare words
+ *  suggested — often one with no write tools — which reads to the user as the
+ *  assistant having forgotten the conversation. */
+const RECENT_TURN_BUDGET = 4000;
+const OLDER_TURN_BUDGET = 1200;
+/** How many of the newest turns are passed through untrimmed-in-practice. */
+const RECENT_TURNS = 2;
+
+/** Trims the middle, not the tail, so both what a turn set out to do and what
+ *  it concluded survive. */
+function trimTurn(content: string, budget: number): string {
+  if (content.length <= budget) return content;
+  const head = Math.ceil(budget * 0.6);
+  const tail = budget - head;
+  return `${content.slice(0, head)}\n... [${content.length - budget} chars omitted] ...\n${content.slice(-tail)}`;
+}
+
 export function formatHistory(history: Message[]): string {
-  if (history.length === 0) return '';
-  const turns = history
-    .filter(m => m.role !== 'system')
-    .map(m => {
+  const messages = history.filter(m => m.role !== 'system');
+  if (messages.length === 0) return '';
+  const firstRecent = messages.length - RECENT_TURNS;
+  const turns = messages
+    .map((m, i) => {
       const role = m.role === 'assistant' ? 'Assistant' : 'User';
-      const snippet = m.content.length > 300 ? m.content.slice(0, 300) + '... [truncated]' : m.content;
-      return `${role}: ${snippet}`;
+      const budget = i >= firstRecent ? RECENT_TURN_BUDGET : OLDER_TURN_BUDGET;
+      return `${role}: ${trimTurn(m.content, budget)}`;
     })
     .join('\n\n');
   return `\n\n### Recent conversation\n${turns}`;

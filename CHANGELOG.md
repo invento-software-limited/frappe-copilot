@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.7.1] - 2026-08-09
+
+### Fixed
+
+- **Router/Planner Lost the Thread Mid-Conversation** — 1.7.0's `formatHistory` optimization cut every transcript turn to its **first** 300 characters before handing it to the router and planner. An assistant turn in the session log is a whole agent run's summary, and the part that resolves a follow-up (which DocType was created, which file path was written, what was left as a TODO) lives in its *closing* lines — so a head-only cut discarded exactly the context the classifier needed. Follow-ups like "now add a validation to that doctype" were then routed on the bare words alone, frequently landing on a specialist with no `write_file`/`edit_file` in its allowlist (`architecture`, `research`, `design`), which surfaced as the assistant explaining instead of editing — i.e. appearing to have forgotten the conversation. Turns are now trimmed from the **middle**, preserving both head and tail, with the two newest turns given a 4,000-character budget and older turns 1,200. Worst-case router overhead for the 6-turn window stays bounded (~13k characters) so the bulk of 1.7.0's saving is retained. Only affects `frappe-copilot.multiAgent.enabled` (default `false`); the agent's own conversation history via `buildEffectiveHistory()` was never truncated.
+- **`grepSearch` Kept Appending After Declaring Output Truncated** — When the 15,000-character output cap was reached mid-file, `totalOutputChars` was left un-saturated before the early `return`, which only unwound one level of the recursive directory walk. Every enclosing call's `totalOutputChars >= maxOutputChars` guard therefore still evaluated false, so sibling directories continued contributing shorter matches *after* the result had already been flagged truncated — producing output that both exceeded the cap and misrepresented where it stopped.
+
+### Chore
+
+- `package-lock.json` version realigned with `package.json` (it had drifted a release behind at `1.6.0`).
+
 ## [1.7.0] - 2026-08-09
 
 ### Performance & Optimization

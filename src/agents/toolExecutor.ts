@@ -299,6 +299,11 @@ export class ToolExecutor {
 
                 const entry = `${relPath}:${i + 1}: ${trimmedLine}`;
                 if (totalOutputChars + entry.length > maxOutputChars) {
+                  // Saturate the counter so the guards in the enclosing
+                  // recursive calls also stop — otherwise this `return` only
+                  // unwinds one level and sibling directories keep appending
+                  // shorter matches after the output was declared truncated.
+                  totalOutputChars = maxOutputChars;
                   isTruncated = true;
                   return;
                 }
