@@ -221,8 +221,9 @@ export class VectorStore {
 
   /** Keyword score fallback based on term frequencies. */
   private keywordSearch(query: string, limit: number): TextChunk[] {
-    const queryTokens = query.toLowerCase().split(/\W+/).filter(Boolean);
-    if (queryTokens.length === 0) return this.data.chunks.slice(0, limit);
+    const stopWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'to', 'for', 'in', 'of', 'on', 'with', 'at', 'by', 'from', 'it', 'this', 'that', 'how', 'i', 'my', 'me', 'you', 'your', 'and', 'or', 'so']);
+    const queryTokens = query.toLowerCase().split(/\W+/).filter(t => t.length > 1 && !stopWords.has(t));
+    if (queryTokens.length === 0) return [];
 
     const scored = this.data.chunks.map(chunk => {
       const textLower = chunk.text.toLowerCase();
@@ -237,6 +238,6 @@ export class VectorStore {
     });
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.filter(s => s.score > 0).slice(0, limit).map(s => s.chunk);
+    return scored.filter(s => s.score >= 0.25).slice(0, limit).map(s => s.chunk);
   }
 }

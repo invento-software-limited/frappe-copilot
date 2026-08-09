@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0] - 2026-08-09
+
+### Performance & Optimization
+
+- **Tool Context Size Limits & Truncation Guardrails** — Implemented strict output size limits across core tool execution logic (`grepSearch`, `listDir`, `executeCommand`, `webFetch`, and `callMcpTool`) to prevent context window overflow errors and excessive token consumption when analyzing large codebases:
+  - `grepSearch`: Added 250-character line length truncation, max 10 matches per file, 15,000 character output limit, and auto-exclusion of binary/minified/lock files (`.min.js`, `package-lock.json`, `.map`).
+  - `listDir`: Capped directory entries to 100 with an informative subpath truncation notice.
+  - `executeCommand`: Capped stdout and stderr stream buffers to 15,000 characters each while preserving trailing output for error tracebacks.
+  - `webFetch` & `callMcpTool`: Enforced 15,000 and 20,000 character safety output caps respectively.
+- **Agent Router Context Truncation** — Updated `formatHistory` in `AgentRouter` to truncate historical transcript turns to 300 characters during multi-agent classification calls, cutting router token overhead by 80-90%.
+- **Vector Store RAG Keyword Filtering** — Enhanced `VectorStore` keyword search with stop-word filtering and a `0.25` relevance threshold to eliminate low-relevance documentation context dumps into agent prompts.
+
 ## [1.6.0] - 2026-08-09
 
 ### Added

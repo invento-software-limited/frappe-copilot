@@ -33,7 +33,11 @@ export function formatHistory(history: Message[]): string {
   if (history.length === 0) return '';
   const turns = history
     .filter(m => m.role !== 'system')
-    .map(m => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content}`)
+    .map(m => {
+      const role = m.role === 'assistant' ? 'Assistant' : 'User';
+      const snippet = m.content.length > 300 ? m.content.slice(0, 300) + '... [truncated]' : m.content;
+      return `${role}: ${snippet}`;
+    })
     .join('\n\n');
   return `\n\n### Recent conversation\n${turns}`;
 }

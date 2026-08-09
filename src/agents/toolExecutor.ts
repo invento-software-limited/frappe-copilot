@@ -195,13 +195,26 @@ export class ToolExecutor {
       return { success: false, output: `'${relPath}' is a file. Use read_file instead.` };
     }
     const files = fs.readdirSync(fullPath);
-    const details = files.map(file => {
+    const maxEntries = 100;
+    const isTruncated = files.length > maxEntries;
+    const displayFiles = files.slice(0, maxEntries);
+
+    const details = displayFiles.map(file => {
       const filePath = path.join(fullPath, file);
-      const fileStat = fs.statSync(filePath);
-      const isDir = fileStat.isDirectory();
-      return `${isDir ? '📁' : '📄'} ${file}${isDir ? '/' : ''}`;
+      try {
+        const fileStat = fs.statSync(filePath);
+        const isDir = fileStat.isDirectory();
+        return `${isDir ? '📁' : '📄'} ${file}${isDir ? '/' : ''}`;
+      } catch {
+        return `📄 ${file}`;
+      }
     });
-    return { success: true, output: details.join('\n') || '(empty directory)' };
+
+    let output = details.join('\n') || '(empty directory)';
+    if (isTruncated) {
+      output += `\n\n... [Showing ${maxEntries} of ${files.length} items. Specify a subpath to view more.]`;
+    }
+    return { success: true, output };
   }
 
   async grepSearch(query: string): Promise<ToolResult> {
@@ -209,9 +222,21 @@ export class ToolExecutor {
     const activeRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || this.workspaceRoot;
     const results: string[] = [];
     const maxResults = 50;
+    const maxResultsPerFile = 10;
+    const maxLineLength = 250;
+    const maxOutputChars = 15000;
+    let totalOutputChars = 0;
+    let isTruncated = false;
+
+    const skipExts = [
+      '.min.js', '.min.css', '.map', '.png', '.jpg', '.jpeg', '.gif',
+      '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.zip',
+      '.gz', '.tar', '.pdf', '.lock', '.log', '.bundle.js'
+    ];
+    const skipFiles = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'composer.lock'];
 
     const searchDir = (dir: string) => {
-      if (results.length >= maxResults) return;
+      if (results.length >= maxResults || totalOutputChars >= maxOutputChars) return;
       let files: string[];
       try {
         files = fs.readdirSync(dir);
@@ -220,7 +245,12 @@ export class ToolExecutor {
       }
 
       for (const file of files) {
-        if (results.length >= maxResults) return;
+        if (results.length >= maxResults || totalOutputChars >= maxOutputChars) return;
+
+        // Skip exact heavy filenames or extension patterns
+        if (skipFiles.includes(file.toLowerCase())) continue;
+        if (skipExts.some(ext => file.toLowerCase().endsWith(ext))) continue;
+
         const fullPath = path.join(dir, file);
         const relPath = path.relative(activeRoot, fullPath);
         const pathParts = relPath.split(path.sep);
@@ -251,14 +281,39 @@ export class ToolExecutor {
           if (stat.isDirectory()) {
             searchDir(fullPath);
           } else if (stat.isFile()) {
+            // Guardrail against huge files (> 1MB) being read line-by-line
+            if (stat.size > 1024 * 1024) continue;
+
             const content = fs.readFileSync(fullPath, 'utf8');
             if (content.includes('\0')) continue; // Skip binary files
 
             const lines = content.split('\n');
+            let matchesInFile = 0;
+
             for (let i = 0; i < lines.length; i++) {
               if (lines[i].toLowerCase().includes(query.toLowerCase())) {
-                results.push(`${relPath}:${i + 1}: ${lines[i].trim()}`);
-                if (results.length >= maxResults) return;
+                let trimmedLine = lines[i].trim();
+                if (trimmedLine.length > maxLineLength) {
+                  trimmedLine = trimmedLine.slice(0, maxLineLength) + '... [truncated line]';
+                }
+
+                const entry = `${relPath}:${i + 1}: ${trimmedLine}`;
+                if (totalOutputChars + entry.length > maxOutputChars) {
+                  isTruncated = true;
+                  return;
+                }
+
+                results.push(entry);
+                totalOutputChars += entry.length + 1;
+                matchesInFile++;
+
+                if (results.length >= maxResults) {
+                  isTruncated = true;
+                  return;
+                }
+                if (matchesInFile >= maxResultsPerFile) {
+                  break; // Stop after max matches per file to avoid one file dominating results
+                }
               }
             }
           }
@@ -269,9 +324,22 @@ export class ToolExecutor {
     };
 
     searchDir(activeRoot);
+
+    if (results.length === 0) {
+      return {
+        success: true,
+        output: `No matches found for '${query}'`
+      };
+    }
+
+    let finalOutput = results.join('\n');
+    if (isTruncated) {
+      finalOutput += `\n\n... [Search output truncated: reached maximum match/character limit. Use a more specific query or narrow down the search directory if needed.]`;
+    }
+
     return {
       success: true,
-      output: results.join('\n') || `No matches found for '${query}'`
+      output: finalOutput
     };
   }
 
@@ -340,7 +408,7 @@ export class ToolExecutor {
       }
 
       exec(cmdToRun, options, (error, stdout, stderr) => {
-        const limitOutput = (text: string, limit: number = 50000) => {
+        const limitOutput = (text: string, limit: number = 15000) => {
           if (!text) return '';
           if (text.length <= limit) return text;
           return `... (truncated ${text.length - limit} characters) ...\n` + text.slice(-limit);
@@ -921,7 +989,15 @@ export class ToolExecutor {
         return { success: false, output: `'arguments' must be valid JSON: ${e.message}` };
       }
     }
-    return await this.mcpManager.callTool(server, tool, parsedArgs);
+    const result = await this.mcpManager.callTool(server, tool, parsedArgs);
+    const maxMcpChars = 20000;
+    if (result.output && result.output.length > maxMcpChars) {
+      return {
+        ...result,
+        output: result.output.slice(0, maxMcpChars) + `\n\n... [MCP Tool output truncated at ${maxMcpChars} characters]`
+      };
+    }
+    return result;
   }
 
   async webFetch(urlStr: string): Promise<ToolResult> {
@@ -962,7 +1038,11 @@ export class ToolExecutor {
         .map(line => line.trim())
         .filter((line, i, arr) => line !== '' || (i > 0 && arr[i-1] !== ''));
       
-      const cleanText = cleanedLines.join('\n').slice(0, 40000);
+      const maxChars = 15000;
+      let cleanText = cleanedLines.join('\n');
+      if (cleanText.length > maxChars) {
+        cleanText = cleanText.slice(0, maxChars) + `\n\n... [Webpage content truncated at ${maxChars} characters]`;
+      }
       return { success: true, output: cleanText || '(empty page content)' };
     } catch (e: any) {
       return { success: false, output: `Web fetch error: ${e.message || String(e)}` };
