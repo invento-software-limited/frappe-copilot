@@ -39,7 +39,7 @@ live bench command execution, and a visual workflow graph.
 
 To install the extension from the compiled VSIX package:
 
-1. Download the latest `frappe-copilot-1.4.0.vsix` asset.
+1. Download the latest `frappe-copilot-1.5.0.vsix` asset.
 2. In VS Code, press **Ctrl+Shift+P** (or **Cmd+Shift+P**) to open the Command Palette.
 3. Run the command **Extensions: Install from VSIX...**.
 4. Select the downloaded `.vsix` file to install it.

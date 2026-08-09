@@ -108,11 +108,27 @@ Format:
   <site>optional_site_name</site>
 </tool_call>`,
   ask_clarification: `If there is any ambiguity, confusion, or missing specifications in the user's prompt or requirements, DO NOT GUESS. You must call this tool to ask clarifying questions. You can ask multiple questions at once. The user will be presented with a popup to answer them, and their answers will be returned to you.
+
+Prefer multiple-choice over free text whenever the answer space is a small, enumerable set (e.g. picking an approach, a field type, yes/no-ish decisions) — this is faster for the user than typing. Give each such question 2-4 concise options as '-' bullets directly under it. Reserve plain free-text questions (no bullets at all) for things that genuinely need typed input (a name, a description, an open-ended requirement).
+
+For an option-based question:
+- Mark exactly one option with a trailing "(recommended)" when you have a genuine best-practice recommendation — it will be pre-selected and visually highlighted for the user, so only use it when you actually believe it's the right default.
+- Append "(multi-select)" to the question line itself if more than one option can apply at once (renders as checkboxes instead of radio buttons).
+- Add a final "- Other" bullet when the listed options might not cover it — this reveals a free-text box the user can fill in instead of picking a listed option.
+
 Format:
 <tool_call name="ask_clarification">
   <questions>
-    1. First clarifying question?
-    2. Second clarifying question?
+    1. First clarifying question (a genuinely open-ended one)?
+    2. Which approach should we use?
+    - Option A (recommended)
+    - Option B
+    - Option C
+    - Other
+    3. Which of these should be included? (multi-select)
+    - Feature X (recommended)
+    - Feature Y
+    - Feature Z
   </questions>
 </tool_call>`,
   update_todo_list: `At the start of a conversation or a complex task, you MUST call this tool to list out the step-by-step tasks you need to perform to fulfill the user's request. As you progress, you should call this tool again to keep the task status updated in the user's interface, marking items as 'completed', 'running', or 'failed'.
@@ -264,6 +280,23 @@ Format:
   <server>server-id from the catalog</server>
   <tool>tool_name from the catalog</tool>
   <arguments><![CDATA[{"key": "value"}]]></arguments>
+</tool_call>`,
+  scaffold_app: `Scaffolds a brand-new Frappe app via 'bench new-app' — use this to create the app skeleton (hooks.py, setup.py/pyproject.toml, modules.txt, etc.) instead of hand-writing those files with write_file. Only 'app_name' is required; everything else defaults sensibly if omitted. Verifies the app actually landed on disk before reporting success. After this succeeds, use read_file/edit_file on the generated files to add real logic — don't regenerate what bench already created.
+Format:
+<tool_call name="scaffold_app">
+  <app_name>snake_case_app_name</app_name>
+  <app_title>Human Readable Title</app_title>
+  <app_description>One-line description</app_description>
+  <app_publisher>Publisher name</app_publisher>
+  <app_email>publisher@example.com</app_email>
+  <app_license>MIT</app_license>
+  <branch_name>main</branch_name>
+</tool_call>`,
+  scaffold_doctype: `Scaffolds a new DocType's boilerplate (JSON + .py controller + .js, matching exactly what this bench's Frappe CLI generates) via 'bench new-doctype' — use this before hand-authoring a brand-new DocType's files. Both 'name' and 'app' are required. After this succeeds, use read_file/edit_file on the generated files to add fields, permissions, and logic — this only creates the skeleton.
+Format:
+<tool_call name="scaffold_doctype">
+  <name>DocType Name</name>
+  <app>target_app_name</app>
 </tool_call>`,
 };
 
