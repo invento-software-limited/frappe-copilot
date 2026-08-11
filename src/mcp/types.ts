@@ -6,7 +6,7 @@ export type McpTransportKind = 'stdio' | 'sse' | 'http';
 
 /** Where a server definition came from — controls whether the user can
  *  edit/delete it from our own UI (only 'manual' ones) and how it's badged. */
-export type McpServerSource = 'manual' | 'vscode' | 'claude';
+export type McpServerSource = 'manual' | 'vscode' | 'claude' | 'gemini';
 
 /** Which mcp.json a manual server is persisted in: the workspace-local
  *  '.frappe-copilot/mcp.json' (this project only) or the global

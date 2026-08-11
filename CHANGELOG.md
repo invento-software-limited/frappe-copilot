@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.8.0] - 2026-08-11
+
+### Added
+
+- **Gemini/Antigravity MCP Server Discovery** — The MCP Servers view now also discovers servers from Gemini CLI/Antigravity's global `~/.gemini/config/mcp_config.json` (`mcpServers`, same per-entry shape as `.mcp.json`), tagged with a new amber "Gemini" badge alongside the existing VS Code and `.mcp.json` sources. Discovered entries default to disabled, same as the other sources.
+- **Cross-Agent Project Memory** — Each agent turn now folds in a read-only digest of what other AI coding tools have already recorded about the project — currently DevMind's `.devmind/memory/*.md` (decisions, known issues, failed attempts, project history) — into the system prompt's dynamic tail, framed explicitly as background rather than instructions. Empty files are skipped and total size is capped (6,000 chars, 2,000 per file) so one chatty memory log can't crowd out the rest of the prompt. New known-agent folders can be added with a one-line entry in `crossAgentMemory.ts`.
+
+### Fixed
+
+- **MCP `${workspace.path}` / `${workspaceFolder}` Placeholders Never Resolved** — Servers discovered from another host's own mcp.json (e.g. Antigravity's `~/.gemini/config/mcp_config.json`) can use that host's `${workspace.path}`-style placeholder for "the open project," which only *that* host substitutes before spawning. `MCPManager` was forwarding the literal placeholder text straight through to the spawned process, which resolved it as a relative path against the extension host's own cwd instead of the workspace — e.g. `graphify`'s `graph_stats`/`get_node`/`query_graph` all failing to find `${workspace.path}/graphify-out/graph.json` under the user's home directory. `MCPManager` now substitutes `${workspace.path}`, `${workspaceFolder}`, and `${workspaceRoot}` with the real workspace root in `command`, `args`, `cwd`, `url`, and `env`/`headers` before connecting, and defaults stdio `cwd` to the workspace root when a discovered entry doesn't set one.
+
 ## [1.7.1] - 2026-08-09
 
 ### Fixed

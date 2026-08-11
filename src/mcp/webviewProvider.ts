@@ -108,6 +108,7 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
   private sourceBadge(config: McpServerConfig): string {
     if (config.source === 'vscode') return '<span class="badge badge-vscode">VS Code</span>';
     if (config.source === 'claude') return '<span class="badge badge-claude">.mcp.json</span>';
+    if (config.source === 'gemini') return '<span class="badge badge-gemini">Gemini</span>';
     return config.scope === 'global'
       ? '<span class="badge badge-global">🌐 Global</span>'
       : '<span class="badge badge-manual">Workspace</span>';
@@ -203,6 +204,7 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
   .badge-global { background: #f59e0b; }
   .badge-vscode { background: #3b82f6; }
   .badge-claude { background: #8b5cf6; }
+  .badge-gemini { background: #f59e0b; }
   .server-summary { font-family: var(--vscode-editor-font-family, monospace); font-size: 10px; color: var(--text-muted); word-break: break-all; }
   .card-meta { font-size: 10px; color: var(--text-muted); }
   .card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -237,7 +239,7 @@ export class MCPWebviewProvider implements vscode.WebviewViewProvider {
 </style>
 </head>
 <body>
-  <div class="hint">Local (stdio) servers run a command you already trust on this machine. Remote servers connect over HTTP/SSE. Servers discovered from <code>.vscode/mcp.json</code> or <code>.mcp.json</code> start disabled — flip them on when you're ready to connect. Choose <b>Workspace</b> scope to keep a server specific to this project, or <b>Global</b> to make it available in every Frappe Copilot workspace (<code>~/.frappe-copilot/mcp.json</code>).</div>
+  <div class="hint">Local (stdio) servers run a command you already trust on this machine. Remote servers connect over HTTP/SSE. Servers discovered from <code>.vscode/mcp.json</code>, <code>.mcp.json</code>, or Gemini's <code>~/.gemini/config/mcp_config.json</code> start disabled — flip them on when you're ready to connect. Choose <b>Workspace</b> scope to keep a server specific to this project, or <b>Global</b> to make it available in every Frappe Copilot workspace (<code>~/.frappe-copilot/mcp.json</code>).</div>
 
   <div class="top-actions">
     <button class="btn" onclick="openAddForm('stdio')">➕ Local Server</button>

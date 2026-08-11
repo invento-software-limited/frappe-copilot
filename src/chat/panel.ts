@@ -26,6 +26,7 @@ import { GraphStore } from '../agents/graphStore';
 import { SkillsStore } from '../agents/skillsStore';
 import { MCPManager } from '../mcp/manager';
 import { readConfig } from '../workspace/structure';
+import { buildCrossAgentContext } from '../workspace/crossAgentMemory';
 import { estimateMessagesTokens, buildCompactionPrompt, DEFAULT_COMPACTION_THRESHOLD_TOKENS } from '../session/compaction';
 import { diffLines } from 'diff';
 
@@ -1300,13 +1301,18 @@ export class ChatPanel {
       }
     }
 
+    // Read-only: whatever other AI agents (e.g. DevMind) have already
+    // recorded about this project in their own dot-folders, so this agent
+    // doesn't rediscover known issues or contradict past decisions.
+    const crossAgentContext = buildCrossAgentContext(root);
+
     // Static per-agent boilerplate (identity/guidelines/tool docs) vs. the
-    // per-turn dynamic tail (RAG/schema/skills/MCP context) — kept as two
-    // pieces so a provider that supports a cacheable-prefix split (see
-    // Message.staticPrefixLength) doesn't lose its cache hit on the big
-    // static part just because the dynamic part changed this turn.
+    // per-turn dynamic tail (RAG/schema/skills/MCP/cross-agent context) —
+    // kept as two pieces so a provider that supports a cacheable-prefix
+    // split (see Message.staticPrefixLength) doesn't lose its cache hit on
+    // the big static part just because the dynamic part changed this turn.
     const staticSystemPart = buildSystemPrompt(agent);
-    const dynamicSystemPart = ragContext + schemaContext + skillsCatalog + mcpCatalog + this.activeSkillContext;
+    const dynamicSystemPart = ragContext + schemaContext + skillsCatalog + mcpCatalog + crossAgentContext + this.activeSkillContext;
 
     const messages = this.hydrateImages([
       {

@@ -5,6 +5,10 @@ import { McpServerConfig, McpServerScope, McpServerSource, McpStoreFile } from '
 
 const MCP_FILE = 'mcp.json';
 const GLOBAL_DIR = path.join(os.homedir(), '.frappe-copilot');
+/** Gemini CLI / Antigravity's own global MCP config — same `mcpServers` shape
+ *  as Claude's `.mcp.json`, just keyed under `~/.gemini` instead of the
+ *  workspace, since that tool has no per-project variant we discover from. */
+const GEMINI_MCP_FILE = path.join(os.homedir(), '.gemini', 'config', 'mcp_config.json');
 
 /** Raw shape of one server entry as it appears in an external config file —
  *  VS Code's `.vscode/mcp.json` ("servers") and Claude Code/Cursor/Claude
@@ -141,12 +145,14 @@ export class MCPStore {
 
   /** Discovered, read-only entries from the IDE's own MCP config files —
    *  VS Code's `.vscode/mcp.json` and the Claude Code/Cursor-style project
-   *  `.mcp.json` at the workspace root. Both default to disabled; the user
+   *  `.mcp.json` at the workspace root, plus Gemini CLI/Antigravity's global
+   *  `~/.gemini/config/mcp_config.json`. All default to disabled; the user
    *  opts each one in from the MCP Servers view. */
   private discoverExternal(): McpServerConfig[] {
     return [
       ...this.discoverFrom(path.join(this.workspaceRoot, '.vscode', 'mcp.json'), 'servers', 'vscode'),
       ...this.discoverFrom(path.join(this.workspaceRoot, '.mcp.json'), 'mcpServers', 'claude'),
+      ...this.discoverFrom(GEMINI_MCP_FILE, 'mcpServers', 'gemini'),
     ];
   }
 

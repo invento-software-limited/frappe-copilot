@@ -31,7 +31,7 @@ export class MCPManager {
   private statuses = new Map<string, McpServerRuntimeState>();
   private onChange?: () => void;
 
-  constructor(frappeCopilotPath: string, workspaceRoot: string, private extensionVersion: string = '0.0.0') {
+  constructor(frappeCopilotPath: string, private workspaceRoot: string, private extensionVersion: string = '0.0.0') {
     this.store = new MCPStore(frappeCopilotPath, workspaceRoot);
   }
 
@@ -237,25 +237,48 @@ export class MCPManager {
     }).filter(Boolean).join('\n');
   }
 
+  /** Variable syntaxes different hosts use in their own mcp.json for "the
+   *  currently open project" — VS Code's `${workspaceFolder}`/`${workspaceRoot}`
+   *  and Antigravity/Gemini CLI's `${workspace.path}`. Those hosts substitute
+   *  the placeholder themselves right before they spawn the server, using
+   *  *their* notion of the open workspace — a config file discovered from disk
+   *  carries the raw placeholder text, not a resolved path. Since we're the
+   *  ones spawning it here, we have to do that same substitution ourselves
+   *  with *our* workspace root, or it passes through literally (e.g. graphify
+   *  resolving "${workspace.path}/graph.json" as a relative path against
+   *  whatever the extension host's cwd happens to be, landing under $HOME
+   *  instead of the project). */
+  private resolvePlaceholders(value: string): string {
+    return value.replace(/\$\{workspace\.path\}|\$\{workspaceFolder\}|\$\{workspaceRoot\}/g, this.workspaceRoot);
+  }
+
+  private resolveEnvMap(env: Record<string, string> | undefined): Record<string, string> | undefined {
+    if (!env) return env;
+    return Object.fromEntries(Object.entries(env).map(([k, v]) => [k, this.resolvePlaceholders(v)]));
+  }
+
   private buildTransport(config: McpServerConfig): Transport {
     switch (config.transport) {
       case 'stdio': {
         if (!config.command) throw new Error(`Server '${config.name}' has no command configured.`);
         return new StdioClientTransport({
-          command: config.command,
-          args: config.args,
-          env: { ...getDefaultEnvironment(), ...(config.env || {}) },
-          cwd: config.cwd,
+          command: this.resolvePlaceholders(config.command),
+          args: config.args?.map(a => this.resolvePlaceholders(a)),
+          env: { ...getDefaultEnvironment(), ...(this.resolveEnvMap(config.env) || {}) },
+          // Default to the workspace root rather than leaving it unset —
+          // otherwise relative paths in args (placeholder-resolved or not)
+          // resolve against the extension host's own cwd, not the project.
+          cwd: config.cwd ? this.resolvePlaceholders(config.cwd) : this.workspaceRoot,
         });
       }
       case 'sse': {
         if (!config.url) throw new Error(`Server '${config.name}' has no URL configured.`);
-        return new SSEClientTransport(new URL(config.url), config.headers ? { requestInit: { headers: config.headers } } : undefined);
+        return new SSEClientTransport(new URL(this.resolvePlaceholders(config.url)), config.headers ? { requestInit: { headers: this.resolveEnvMap(config.headers) } } : undefined);
       }
       case 'http':
       default: {
         if (!config.url) throw new Error(`Server '${config.name}' has no URL configured.`);
-        return new StreamableHTTPClientTransport(new URL(config.url), config.headers ? { requestInit: { headers: config.headers } } : undefined);
+        return new StreamableHTTPClientTransport(new URL(this.resolvePlaceholders(config.url)), config.headers ? { requestInit: { headers: this.resolveEnvMap(config.headers) } } : undefined);
       }
     }
   }
