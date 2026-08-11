@@ -463,7 +463,6 @@ function getCommandEmoji(id: string): string {
       return '💻';
     case 'new-site':
     case 'new-app':
-    case 'new-doctype':
       return '➕';
     case 'drop-site':
     case 'remove-app':

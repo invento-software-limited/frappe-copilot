@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.8.1] - 2026-08-11
+
+### Fixed
+
+- **`scaffold_doctype` Called a `bench new-doctype` Command That Doesn't Exist** — Verified against the full `bench --help` command listing (host + framework commands) that Frappe framework has no `new-doctype` CLI subcommand at all, and none of the currently installed apps register one via `bench_commands` hooks either — every call failed with `Error: No such command: new-doctype`. Rewrote `scaffoldDoctype` to insert the `DocType` document directly through the ORM via `bench execute` (the same temp-module mechanism `introspect_doctype` uses), which is what actually generates the JSON/`.py` controller/`.js`/test files — `DocType.on_update()` calls `export_doc()` + `make_controller_template()` under the hood, gated on `developer_mode`, the same path the Desk "New DocType" dialog itself triggers. Added optional `module` (auto-detected when the app has exactly one Module Def, otherwise reported explicitly instead of guessed) and `site` (falls back to the configured default site) parameters. Also fixes a related bug caught while live-testing the rewrite: the default permission row's `'import': 1` bit throws `check_if_importable`'s `ValidationError` unless `doc.allow_import` is also set, which a fresh DocType never has — dropped from the default set. Removed the now-dead `new-doctype` template from the manual Bench Commands picker, which pointed at the same nonexistent command.
+
 ## [1.8.0] - 2026-08-11
 
 ### Added

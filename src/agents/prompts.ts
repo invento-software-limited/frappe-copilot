@@ -292,11 +292,13 @@ Format:
   <app_license>MIT</app_license>
   <branch_name>main</branch_name>
 </tool_call>`,
-  scaffold_doctype: `Scaffolds a new DocType's boilerplate (JSON + .py controller + .js, matching exactly what this bench's Frappe CLI generates) via 'bench new-doctype' — use this before hand-authoring a brand-new DocType's files. Both 'name' and 'app' are required. After this succeeds, use read_file/edit_file on the generated files to add fields, permissions, and logic — this only creates the skeleton.
+  scaffold_doctype: `Scaffolds a new DocType's boilerplate (JSON + .py controller + .js + test file) by inserting the DocType document through the ORM — the same mechanism the Desk "New DocType" dialog uses — not a 'bench new-doctype' CLI command (it doesn't exist in Frappe framework). Use this before hand-authoring a brand-new DocType's files. Both 'name' and 'app' are required; 'module' is optional and only needed if the target app has more than one Module Def (auto-detected when there's exactly one); 'site' is optional and falls back to the configured default site. Requires the site to have developer_mode enabled, or the files won't be written to disk. After this succeeds, use read_file/edit_file on the generated files to add fields, permissions, and logic — this only creates the skeleton.
 Format:
 <tool_call name="scaffold_doctype">
   <name>DocType Name</name>
   <app>target_app_name</app>
+  <module>Optional Module Name</module>
+  <site>optional-site.name</site>
 </tool_call>`,
 };
 

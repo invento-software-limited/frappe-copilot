@@ -900,22 +900,120 @@ export class ToolExecutor {
     return { success: true, output: `App '${appName}' scaffolded successfully.\n${result.output}` };
   }
 
-  /** Scaffolds a new DocType's boilerplate (JSON + .py controller + .js) via
-   *  `bench new-doctype` instead of hand-authoring those files, so the
-   *  generated structure matches exactly what Frappe's own CLI produces for
-   *  this bench's Frappe version. Follow-up field/logic edits still go
-   *  through read_file/edit_file as normal. */
+  /** Scaffolds a new DocType's boilerplate (JSON + .py controller + .js + test
+   *  file) by inserting a `DocType` document through the ORM, the same way
+   *  the Desk "New DocType" dialog does — NOT via a `bench new-doctype` CLI
+   *  command, which doesn't exist in Frappe framework (verified against the
+   *  full `bench --help` command listing; there is no such subcommand at any
+   *  currently-supported version). `DocType.on_update()` is what actually
+   *  writes the JSON/controller/test files to disk (via `export_doc()` /
+   *  `make_controller_template()`), gated on the site having `developer_mode`
+   *  enabled — the same condition the Desk dialog itself relies on. Runs
+   *  through `runPythonOneLiner` (temp module under `bench execute`), so it
+   *  needs a resolvable site, unlike the old CLI-command approach.
+   *  Follow-up field/logic edits still go through read_file/edit_file as
+   *  normal — this only creates the skeleton. */
   async scaffoldDoctype(args: Record<string, string>): Promise<ToolResult> {
     const { name, app } = args;
     if (!name || !app) return { success: false, output: 'Missing required parameter(s): name, app' };
-    const cmd = getCommandById('new-doctype');
-    if (!cmd) return { success: false, output: "Internal error: 'new-doctype' bench command template not found." };
 
     const safeName = this.sanitizeMetaField(name, '');
     if (!safeName) return { success: false, output: 'Invalid doctype name.' };
     const safeApp = this.sanitizeAppName(app);
+    const safeModule = args.module ? this.sanitizeMetaField(args.module, '') : '';
 
-    return await this.executeCommand(resolveCommand(cmd, { name: safeName, app: safeApp }));
+    const site = this.resolveSite(args.site);
+    if (!site) {
+      return {
+        success: false,
+        output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.'
+      };
+    }
+
+    const b64 = this.b64Json({ name: safeName, app: safeApp, module: safeModule || undefined });
+    const code = [
+      "import frappe, json, base64, os",
+      "from frappe.modules.utils import get_doc_path",
+      `payload = json.loads(base64.b64decode('${b64}').decode('utf-8'))`,
+      "name = payload['name']",
+      "app = payload['app']",
+      "module = payload.get('module') or None",
+      "result = {}",
+      "if frappe.db.exists('DocType', name):",
+      "    result = {'error': 'exists', 'name': name}",
+      "else:",
+      "    if not module:",
+      "        mods = frappe.get_all('Module Def', filters={'app_name': app}, pluck='name')",
+      "        if len(mods) == 1:",
+      "            module = mods[0]",
+      "        else:",
+      "            result = {'error': 'module', 'app': app, 'modules': mods}",
+      "    if module and not result:",
+      "        if not frappe.db.exists('Module Def', module):",
+      "            result = {'error': 'no_such_module', 'module': module}",
+      "        else:",
+      "            doc = frappe.new_doc('DocType')",
+      "            doc.name = name",
+      "            doc.module = module",
+      "            doc.custom = 0",
+      "            doc.fields = []",
+      // 'import' is deliberately left off: DocType.validate()'s
+      // check_if_importable() throws unless doc.allow_import is also set, which
+      // a fresh DocType doesn't have — including it here would make every
+      // scaffold fail validation. 'export' isn't gated the same way.
+      "            doc.append('permissions', {",
+      "                'role': 'System Manager', 'read': 1, 'write': 1, 'create': 1,",
+      "                'delete': 1, 'report': 1, 'export': 1, 'share': 1,",
+      "                'print': 1, 'email': 1,",
+      "            })",
+      "            doc.insert(ignore_permissions=True)",
+      "            frappe.db.commit()",
+      "            doc_path = str(get_doc_path(module, 'DocType', name))",
+      "            json_path = os.path.join(doc_path, frappe.scrub(name) + '.json')",
+      "            result = {'success': True, 'name': doc.name, 'module': module, 'path': doc_path, 'file_exists': os.path.exists(json_path)}",
+      "print(json.dumps(result))",
+    ].join('\n');
+
+    const result = await this.runPythonOneLiner(site, code);
+    if (!result.success) return result;
+
+    let parsed: any;
+    try {
+      const jsonLine = result.output.trim().split('\n').filter(Boolean).pop() || '{}';
+      parsed = JSON.parse(jsonLine);
+    } catch {
+      return { success: false, output: `Doctype scaffold script ran but produced unparseable output:\n${result.output}` };
+    }
+
+    if (parsed.error === 'exists') {
+      return { success: false, output: `DocType '${parsed.name}' already exists — use read_file/edit_file on its existing files instead of re-scaffolding.` };
+    }
+    if (parsed.error === 'module') {
+      const mods: string[] = parsed.modules || [];
+      return {
+        success: false,
+        output: mods.length
+          ? `App '${parsed.app}' has multiple modules (${mods.join(', ')}) — pass 'module' explicitly in the tool call.`
+          : `App '${parsed.app}' has no Module Def records — pass 'module' explicitly, or create one first.`
+      };
+    }
+    if (parsed.error === 'no_such_module') {
+      return { success: false, output: `Module '${parsed.module}' does not exist.` };
+    }
+    if (!parsed.success) {
+      return { success: false, output: `Doctype scaffold script ran but returned an unexpected result:\n${result.output}` };
+    }
+    if (!parsed.file_exists) {
+      return {
+        success: false,
+        output: `DocType '${parsed.name}' was inserted into the database under module '${parsed.module}', but its JSON file wasn't found on disk at ${parsed.path} afterward — check that 'developer_mode' is enabled for site '${site}' in site_config.json.`
+      };
+    }
+
+    return {
+      success: true,
+      output: `DocType '${parsed.name}' scaffolded in module '${parsed.module}' (${parsed.path}). JSON + .py controller + .js + test files were generated by Frappe's own DocType-insert boilerplate step — the same one the Desk "New DocType" dialog uses. Use read_file/edit_file to add fields, permissions, and logic.`
+    };
   }
 
   async webSearch(query: string): Promise<ToolResult> {

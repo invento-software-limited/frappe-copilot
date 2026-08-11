@@ -569,15 +569,6 @@ export const BENCH_COMMANDS: BenchCommand[] = [
   // DOCTYPE / SCHEMA — DocType operations
   // ═══════════════════════════════════════════════════════════════════════════
   {
-    id: 'new-doctype',
-    name: 'Create new DocType',
-    description: 'Scaffold a new DocType in an app',
-    template: 'bench new-doctype {name} --app {app}',
-    category: 'doctype',
-    destructive: false,
-    requiresSite: false,
-  },
-  {
     id: 'reload-doctype',
     name: 'Reload DocType',
     description: 'Reload a DocType from its JSON file',
