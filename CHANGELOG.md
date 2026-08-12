@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.8.3] - 2026-08-12
+
+### Added
+
+- **Live Streaming Command Output in Chat UI** — Extended `ToolExecutor.executeCommand` with stdout/stderr chunk callbacks via `child_process.spawn`. `execute_command` tool calls and `self-verify` loops now stream long-running command output (e.g. `bench migrate`, `bench run-tests`, `bench build`) directly into the chat UI in real time instead of leaving the tool card silent until completion.
+
+### Fixed
+
+- **Panel Webview View Provider Refactor & Fixes** — Restored proper secondary column layout (`ViewColumn.Two`) for `ChatPanel` webview, removed dead `webviewView` references, and improved error handling during command execution.
+
 ## [1.8.2] - 2026-08-11
 
 ### Fixed

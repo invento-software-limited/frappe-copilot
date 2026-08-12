@@ -108,7 +108,6 @@ export class ChatPanel {
   public static readonly viewType = 'frappeCopilot.chat';
 
   private panel: vscode.WebviewPanel | null = null;
-  private webviewView: vscode.WebviewView | null = null;
   private disposables: vscode.Disposable[] = [];
   private uploadsDir: string = '';
   private toolExecutor: ToolExecutor;
@@ -160,9 +159,12 @@ export class ChatPanel {
   }
 
   show(): void {
-    if (this.panel) { this.panel.reveal(vscode.ViewColumn.Beside); return; }
+    if (this.panel) {
+      this.panel.reveal(vscode.ViewColumn.Two, false);
+      return;
+    }
     this.panel = vscode.window.createWebviewPanel(
-      ChatPanel.viewType, 'Frappe Copilot', vscode.ViewColumn.Beside,
+      ChatPanel.viewType, 'Frappe Copilot', vscode.ViewColumn.Two,
       { enableScripts: true, retainContextWhenHidden: true }
     );
     this.panel.iconPath = vscode.Uri.file(
@@ -193,7 +195,6 @@ export class ChatPanel {
   }
   private say(type: string, data: any) {
     const payload = { type, ...(typeof data === 'object' ? data : { status: data }) };
-    this.webviewView?.webview.postMessage(payload);
     this.panel?.webview.postMessage(payload);
   }
   private chat(role: string, content: string) { this.say('addMessage', { message: { role, content } }); }
@@ -1557,7 +1558,13 @@ export class ChatPanel {
             });
           }
 
-          const result = await this.toolExecutor.runTool(tool.name, tool.args, agent.allowedTools);
+          // Stream execute_command's stdout/stderr live into its tool card
+          // instead of leaving the card silent until the whole command
+          // (e.g. a long bench migrate/build) finishes.
+          const onOutputChunk = tool.name === 'execute_command'
+            ? (chunk: string) => this.say('toolOutputChunk', { tool: tool.name, chunk })
+            : undefined;
+          const result = await this.toolExecutor.runTool(tool.name, tool.args, agent.allowedTools, onOutputChunk);
           resultOutput = result.output;
 
           if (result.success && tool.name === 'use_skill' && tool.args.id) {
@@ -1692,14 +1699,22 @@ export class ChatPanel {
       let roundOutput = '';
       let roundFailed = false;
 
+      // Stream migrate/test output live — these can run long enough that
+      // the chat would otherwise look frozen with no feedback at all.
+      const onChunk = (chunk: string) => this.say('verifyOutputChunk', { runId, round: roundsUsed, chunk });
+
       if (plan.shouldMigrate) {
-        const result = await this.toolExecutor.executeCommand(migrateCmd(site));
+        const migrateCommand = migrateCmd(site);
+        onChunk(`$ ${migrateCommand}\n`);
+        const result = await this.toolExecutor.executeCommand(migrateCommand, onChunk);
         roundOutput += `[migrate]\n${result.output}\n`;
         if (!result.success) roundFailed = true;
       }
       if (!roundFailed) {
         for (const testCmd of plan.testCommands) {
-          const result = await this.toolExecutor.executeCommand(testCmd.command(site));
+          const testCommand = testCmd.command(site);
+          onChunk(`\n$ ${testCommand}\n`);
+          const result = await this.toolExecutor.executeCommand(testCommand, onChunk);
           roundOutput += `[${testCmd.description}]\n${result.output}\n`;
           if (!result.success) { roundFailed = true; break; }
         }
@@ -1781,7 +1796,6 @@ export class ChatPanel {
   }
 
   private postWebviewMessage(msg: any) {
-    this.webviewView?.webview.postMessage(msg);
     this.panel?.webview.postMessage(msg);
   }
 

@@ -980,6 +980,7 @@ window.onerror = function(message, source, lineno, colno, error) {
   var atc=document.getElementById('atc'),fnEl=document.getElementById('fn'),rmEl=document.getElementById('rma');
   var isSt=false,se=null,attachedFile=null;
   var curToolCard = null;
+  var curToolStreamed = false;
   var activeMentions = [];
 
   var toolMeta = {
@@ -1184,14 +1185,69 @@ window.onerror = function(message, source, lineno, colno, error) {
     };
   }
 
-  function showVerifyResult(m) {
+  // Live-updating card for the currently running verify pass (bench migrate /
+  // run-tests). Kept separate from curToolCard since verification runs
+  // outside the model's own tool-calling loop (see runVerificationPhase).
+  var curVerifyCard = null;
+  var curVerifyRunId = null;
+
+  function showVerifyRunning(m) {
+    if (curVerifyCard && curVerifyRunId === m.runId) {
+      var titleEl = curVerifyCard.querySelector('.verify-card-title');
+      if (titleEl) titleEl.textContent = '🔍 Verifying (round ' + m.round + ')…';
+      var outPre = curVerifyCard.querySelector('#verify-live-out');
+      if (outPre && outPre.textContent) outPre.textContent += '\n\n=== Round ' + m.round + ' ===\n';
+      stickScroll();
+      return;
+    }
+    curVerifyRunId = m.runId;
     var d=document.createElement('div');
-    d.className='msg system-msg verify-result-msg';
+    d.className='msg system-msg verify-running-msg';
+    d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
+      '<div class="verify-card">' +
+        '<div class="verify-card-title">🔍 Verifying (round '+m.round+')…</div>' +
+        '<pre class="tool-out show" id="verify-live-out"></pre>' +
+      '</div></div>';
+    appendToChat(d);
+    curVerifyCard = d;
+  }
+
+  function showVerifyOutputChunk(m) {
+    if (!curVerifyCard || curVerifyRunId !== m.runId) return;
+    var outPre = curVerifyCard.querySelector('#verify-live-out');
+    if (!outPre) return;
+    outPre.textContent += m.chunk;
+    stickScroll();
+  }
+
+  function showVerifyResult(m) {
     var icon = m.passed ? '✅' : '❌';
     var text = m.passed
       ? 'Verification passed ('+m.roundsUsed+' attempt(s))'
       : 'Verification FAILED after '+m.roundsUsed+' attempt(s)';
     var notesHtml = (m.missingTestNotes||[]).map(function(n){ return '<div class="verify-note">'+esc(n)+'</div>'; }).join('');
+
+    // Finish the live card in place — its streamed output already shows the
+    // full transcript, so there's no need for a second, separate result card.
+    if (curVerifyCard && curVerifyRunId === m.runId) {
+      var titleEl = curVerifyCard.querySelector('.verify-card-title');
+      if (titleEl) titleEl.textContent = icon + ' ' + text;
+      if (notesHtml) {
+        var notesWrap = document.createElement('div');
+        notesWrap.innerHTML = notesHtml;
+        var cardEl = curVerifyCard.querySelector('.verify-card');
+        while (notesWrap.firstChild) cardEl.appendChild(notesWrap.firstChild);
+      }
+      curVerifyCard = null;
+      curVerifyRunId = null;
+      stickScroll();
+      return;
+    }
+
+    // Fallback for when no live card was streamed (e.g. replaying an older
+    // session log that predates streaming, or events arriving out of order).
+    var d=document.createElement('div');
+    d.className='msg system-msg verify-result-msg';
     var errHtml = (!m.passed && m.lastError) ? '<pre class="tool-out show">'+esc(m.lastError.slice(0,2000))+'</pre>' : '';
     d.innerHTML='<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
       '<span class="badge '+(m.passed?'b-on':'b-off')+'">'+icon+' '+esc(text)+'</span>' + notesHtml + errHtml + '</div>';
@@ -2540,6 +2596,8 @@ window.onerror = function(message, source, lineno, colno, error) {
         break;
       case 'runTranscript': renderRunTranscript(m.runId, m.entries); break;
       case 'verifyApprovalRequired': showVerifyApproval(m); break;
+      case 'verifyRunning': showVerifyRunning(m); break;
+      case 'verifyOutputChunk': showVerifyOutputChunk(m); break;
       case 'verifyResult': showVerifyResult(m); break;
       case 'planApprovalRequired': showPlanApproval(m); break;
       case 'featureStageStarted': showFeatureStage(m, true); break;
@@ -2594,6 +2652,7 @@ window.onerror = function(message, source, lineno, colno, error) {
       case 'toolCallStarted':
         showThinking(getToolDescription(m.tool, m.args));
         curToolCard = createToolCard(m.tool, m.args);
+        curToolStreamed = false;
         break;
 
       case 'toolApprovalRequired':
@@ -2648,6 +2707,32 @@ window.onerror = function(message, source, lineno, colno, error) {
           var storedArgs = curToolCard.getAttribute('data-args');
           var parsedArgs = storedArgs ? JSON.parse(storedArgs) : {};
           showThinking(getToolDescription(m.tool, parsedArgs));
+
+          // execute_command streams live below — pre-open the output pane so
+          // the first chunk lands somewhere visible instead of behind a toggle.
+          if (m.tool === 'execute_command') {
+            var liveOutCont = curToolCard.querySelector('#t-out-container');
+            var liveOutPre = curToolCard.querySelector('#t-out');
+            var liveToggle = curToolCard.querySelector('#btn-toggle');
+            liveOutCont.style.display = 'block';
+            liveOutPre.textContent = '';
+            liveOutPre.classList.add('show');
+            liveToggle.textContent = 'Hide Details';
+            liveToggle.onclick = function() {
+              var show = liveOutPre.classList.toggle('show');
+              liveToggle.textContent = show ? 'Hide Details' : 'Show Details';
+            };
+          }
+        }
+        break;
+
+      case 'toolOutputChunk':
+        if (curToolCard) {
+          curToolStreamed = true;
+          var chunkOutPre = curToolCard.querySelector('#t-out');
+          chunkOutPre.textContent += m.chunk;
+          chunkOutPre.scrollTop = chunkOutPre.scrollHeight;
+          stickScroll();
         }
         break;
 
@@ -2659,7 +2744,10 @@ window.onerror = function(message, source, lineno, colno, error) {
             toolStatusEl.textContent = m.success ? 'success' : 'failed';
           }
 
-          if (m.output) {
+          // Already streamed live above — the final m.output is the same
+          // content re-wrapped (STDOUT:/STDERR: + truncation), so overwriting
+          // here would just replace the live transcript with a lossier copy.
+          if (m.output && !curToolStreamed) {
             var outCont = curToolCard.querySelector('#t-out-container');
             var outPre = curToolCard.querySelector('#t-out');
             var toggle = curToolCard.querySelector('#btn-toggle');
@@ -2673,6 +2761,7 @@ window.onerror = function(message, source, lineno, colno, error) {
             };
           }
           curToolCard = null;
+          curToolStreamed = false;
         }
         break;
       case 'insertCodeMention':

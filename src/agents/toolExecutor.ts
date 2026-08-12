@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import * as yaml from 'js-yaml';
-import { exec, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import { BenchEnvironment } from '../types';
 import { ToolName } from './types';
 import { readConfig } from '../workspace/structure';
@@ -33,7 +33,12 @@ export class ToolExecutor {
    *  what the model was prompted with, since a prompt only constrains the
    *  model's own reasoning, not adversarial content reflected back through a
    *  prior tool result (e.g. injected instructions in a fetched web page). */
-  async runTool(name: string, args: Record<string, string>, allowedTools: ToolName[]): Promise<ToolResult> {
+  async runTool(
+    name: string,
+    args: Record<string, string>,
+    allowedTools: ToolName[],
+    onOutputChunk?: (chunk: string) => void
+  ): Promise<ToolResult> {
     if (!allowedTools.includes(name as ToolName)) {
       return { success: false, output: `Tool '${name}' is not permitted for this agent. Available tools: ${allowedTools.join(', ')}` };
     }
@@ -50,7 +55,7 @@ export class ToolExecutor {
         case 'grep_search':
           return await this.grepSearch(args.query);
         case 'execute_command':
-          return await this.executeCommand(args.command);
+          return await this.executeCommand(args.command, onOutputChunk);
         case 'introspect_doctype':
           return await this.introspectDocType(args.doctype, args.site);
         case 'list_customizations':
@@ -348,7 +353,11 @@ export class ToolExecutor {
     };
   }
 
-  async executeCommand(commandStr: string): Promise<ToolResult> {
+  /** `onChunk`, when given, is called with each raw stdout/stderr chunk as it
+   *  arrives — used to stream long-running bench commands (migrate, run-tests,
+   *  build, ...) into the chat UI live instead of leaving it silent until the
+   *  whole command finishes. The final ToolResult is unchanged either way. */
+  async executeCommand(commandStr: string, onChunk?: (chunk: string) => void): Promise<ToolResult> {
     if (!commandStr) return { success: false, output: 'Missing command parameter' };
 
     const activeRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || this.workspaceRoot;
@@ -397,40 +406,62 @@ export class ToolExecutor {
       wslCwd = '/' + match[2].replace(/\\/g, '/');
     }
 
-    return new Promise((resolve) => {
-      const maxBuffer = 10 * 1024 * 1024; // 10MB buffer
-      const options: any = { maxBuffer };
-      let cmdToRun = fullCommand;
+    let cmdToRun = fullCommand;
+    // spawn(cmd, [], { shell }) hands the whole string to a shell instead of
+    // treating it as a single argv[0] — needed since cmdToRun can contain
+    // pipes/redirects (docker exec ... sh -c '...', wsl --cd ..., etc). true
+    // picks node's platform default (/bin/sh on unix, cmd.exe on Windows),
+    // matching what exec() used before this was switched to spawn.
+    const spawnOptions: any = { windowsHide: true, shell: true };
 
-      if (isWsl) {
-        // Wrap command in wsl shell executor to support docker and python utilities inside the WSL environment
-        cmdToRun = `wsl -d ${wslDistro} --cd "${wslCwd}" -- ${fullCommand}`;
-      } else {
-        options.cwd = cwdDir;
-        if (process.platform === 'win32') {
-          options.shell = 'powershell.exe';
-        }
+    if (isWsl) {
+      // Wrap command in wsl shell executor to support docker and python utilities inside the WSL environment
+      cmdToRun = `wsl -d ${wslDistro} --cd "${wslCwd}" -- ${fullCommand}`;
+    } else {
+      spawnOptions.cwd = cwdDir;
+      if (process.platform === 'win32') {
+        spawnOptions.shell = 'powershell.exe';
       }
+    }
 
-      exec(cmdToRun, options, (error, stdout, stderr) => {
+    return new Promise((resolve) => {
+      const child = spawn(cmdToRun, [], spawnOptions);
+
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout?.on('data', (data: Buffer) => {
+        const chunk = data.toString();
+        stdout += chunk;
+        onChunk?.(chunk);
+      });
+      child.stderr?.on('data', (data: Buffer) => {
+        const chunk = data.toString();
+        stderr += chunk;
+        onChunk?.(chunk);
+      });
+
+      const finish = (exitCode: number | null, errMsg?: string) => {
         const limitOutput = (text: string, limit: number = 15000) => {
           if (!text) return '';
           if (text.length <= limit) return text;
           return `... (truncated ${text.length - limit} characters) ...\n` + text.slice(-limit);
         };
 
-        const cleanStdout = limitOutput(typeof stdout === 'string' ? stdout : stdout.toString('utf8'));
-        const cleanStderr = limitOutput(typeof stderr === 'string' ? stderr : stderr.toString('utf8'));
+        const cleanStdout = limitOutput(stdout);
+        const cleanStderr = limitOutput(stderr);
 
         const output = [
           cleanStdout ? `STDOUT:\n${cleanStdout}` : '',
           cleanStderr ? `STDERR:\n${cleanStderr}` : ''
         ].filter(Boolean).join('\n');
 
-        if (error) {
+        if (errMsg || exitCode !== 0) {
           resolve({
             success: false,
-            output: `Command failed with exit code ${error.code || 1}\n\n${output}`
+            output: errMsg
+              ? `Command failed to start: ${errMsg}\n\n${output}`
+              : `Command failed with exit code ${exitCode}\n\n${output}`
           });
         } else {
           resolve({
@@ -438,7 +469,10 @@ export class ToolExecutor {
             output: output || '(command executed successfully with no output)'
           });
         }
-      });
+      };
+
+      child.on('close', (exitCode: number | null) => finish(exitCode));
+      child.on('error', (err: Error) => finish(1, err.message));
     });
   }
 
