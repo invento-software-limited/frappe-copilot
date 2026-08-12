@@ -109,6 +109,7 @@ export class ChatPanel {
 
   private panel: vscode.WebviewPanel | null = null;
   private disposables: vscode.Disposable[] = [];
+  private vectorStoreWatchers: vscode.Disposable[] = [];
   private uploadsDir: string = '';
   private toolExecutor: ToolExecutor;
   private vectorStore: VectorStore | null = null;
@@ -144,17 +145,20 @@ export class ChatPanel {
     // process/socket, so there must only ever be one manager instance.
     private mcpManager: MCPManager | null = null
   ) {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
     const fp = this.getFrappeCopilotPath();
     if (fp) {
       this.uploadsDir = path.join(fp, 'uploads');
-      this.vectorStore = new VectorStore(fp, extensionPath, provider);
       this.graphStore = new GraphStore(fp);
+      // Built before VectorStore since the knowledge base indexes the skills
+      // library too (see VectorStore's 'skill' source type).
       this.skillsStore = new SkillsStore(fp, path.join(extensionPath, 'assets', 'skills'));
       this.skillsStore.migrateLegacyMemoryIfNeeded();
+      this.vectorStore = new VectorStore(fp, extensionPath, provider, root, this.skillsStore);
+      this.vectorStoreWatchers = this.vectorStore.watch();
       this.introspectSchema(fp);
     }
 
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
     this.toolExecutor = new ToolExecutor(root, benchEnv, this.skillsStore, this.mcpManager);
   }
 
@@ -1268,9 +1272,9 @@ export class ChatPanel {
     let ragContext = '';
     if (this.vectorStore) {
       try {
-        const results = await this.vectorStore.search(userMessage, 3);
+        const results = await this.vectorStore.search(userMessage, 6);
         if (results.length > 0) {
-          ragContext = `\n\n### Retrieved Documentation Context\nUse the following reference snippets to guide your implementation, ensuring you adhere to correct APIs and patterns:\n\n` +
+          ragContext = `\n\n### Retrieved Knowledge Base Context\nRetrieved from framework docs, this workspace's own code, your notes, skills, and other agents' memory — use it to guide your implementation, ensuring you adhere to correct APIs and this project's own existing patterns:\n\n` +
                        results.map(r => `--- [Source: ${r.source}] ---\n${r.text}`).join('\n\n');
         }
       } catch (e) {
@@ -1803,6 +1807,16 @@ export class ChatPanel {
     this.panel = null;
     this.disposables.forEach(d => d.dispose());
     this.disposables = [];
+  }
+
+  /** Stops the knowledge-base file watcher. Deliberately NOT called from
+   *  dispose() above — that fires whenever just the webview tab is closed,
+   *  while this ChatPanel object (and its VectorStore) lives on for a later
+   *  show() to reuse. Only extension deactivation should actually tear the
+   *  watcher down. */
+  disposeVectorStoreWatchers(): void {
+    this.vectorStoreWatchers.forEach(d => d.dispose());
+    this.vectorStoreWatchers = [];
   }
 
   private async introspectSchema(fp: string): Promise<void> {

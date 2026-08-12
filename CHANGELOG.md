@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.9.0] - 2026-08-12
+
+### Added
+
+- **Unified Knowledge Base & Vector Store Engine** — Re-architected `VectorStore` into a comprehensive project-wide retrieval engine:
+  - Multi-source indexing across framework docs, templates, workspace code (`.py`, `.js`, `.json`), user notes (`.frappe-copilot/knowledge`), developer skills, and cross-agent memory (`.devmind/memory`).
+  - Added `.frappe-copilot/knowledge/` directory auto-seeding with `README.md`.
+  - Incremental, hash-based indexing per document so unchanged files bypass re-embedding.
+  - Automatic workspace file-system watcher to auto-resync the knowledge base index on file changes.
+  - Hybrid search algorithm combining vector embeddings cosine similarity with term overlap lexical scoring.
+
 ## [1.8.3] - 2026-08-12
 
 ### Added

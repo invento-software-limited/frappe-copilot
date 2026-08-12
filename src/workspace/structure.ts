@@ -12,6 +12,7 @@ const REQUIRED_DIRECTORIES = [
   'docs',
   'agents',
   'plans',
+  'knowledge',
 ];
 
 /**
@@ -35,6 +36,22 @@ export function initializeWorkspaceStructure(): string | null {
     if (!fs.existsSync(fullPath)) {
       fs.mkdirSync(fullPath, { recursive: true });
     }
+  }
+
+  // Seed the knowledge base folder with a short README so it's obvious what
+  // it's for — everything dropped here is indexed into the AI's retrieval
+  // context alongside bundled docs, the workspace's own code, skills, and
+  // other agents' memory notes (see VectorStore).
+  const knowledgeReadmePath = path.join(frappeCopilotPath, 'knowledge', 'README.md');
+  if (!fs.existsSync(knowledgeReadmePath)) {
+    fs.writeFileSync(
+      knowledgeReadmePath,
+      '# Knowledge Base\n\n' +
+      'Drop your own markdown notes, specs, or decisions here (subfolders are fine). ' +
+      'Everything in this folder is automatically indexed and retrieved alongside ' +
+      "bundled docs, this workspace's own code, skills, and other agents' memory " +
+      'notes whenever you chat with Frappe Copilot.\n'
+    );
   }
 
   // Create default config if it doesn't exist

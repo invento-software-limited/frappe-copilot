@@ -6,7 +6,7 @@ import * as path from 'path';
  *  alongside another agent's tooling is always safe. Add an entry here to
  *  pick up a new tool; everything else (reading, capping, formatting) is
  *  generic. */
-const KNOWN_AGENT_DIRS: { label: string; relDir: string }[] = [
+export const KNOWN_AGENT_DIRS: { label: string; relDir: string }[] = [
   { label: 'DevMind', relDir: '.devmind/memory' },
 ];
 
