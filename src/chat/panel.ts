@@ -1297,7 +1297,7 @@ export class ChatPanel {
     if (this.mcpManager && agent.allowedTools.includes('call_mcp_tool')) {
       const catalog = this.mcpManager.buildCatalog();
       if (catalog) {
-        mcpCatalog = `\n\n### Available MCP Tools\nCall 'call_mcp_tool' with the server id and tool name shown below:\n\n${catalog}`;
+        mcpCatalog = `\n\n### Available MCP Tools\nCheck this list before falling back to grep/read_file/web_search for anything one of these tools already covers — call it proactively via 'call_mcp_tool' with the server id and tool name shown below, don't wait to be asked by name:\n\n${catalog}`;
       }
     }
 

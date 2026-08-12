@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.8.2] - 2026-08-11
+
+### Fixed
+
+- **MCP Tools Never Picked Up Unless Named Explicitly** — The "MCP Tools Catalog" system-prompt guideline and its inline "Available MCP Tools" header only ever explained *how* to call `call_mcp_tool` (server id, tool name, arguments), never *when* — unlike the Skills Catalog guideline right next to it ("When a catalog entry looks relevant..."), there was no trigger condition telling the model to check the catalog on its own. Every agent (including the General fallback) already has `call_mcp_tool` in its allowlist, so this wasn't a wiring/routing issue — the model simply defaulted to grep/read_file/general knowledge and only reached for a connected server when the user named it directly. Both the guideline (`src/agents/prompts.ts`) and the inline catalog header (`src/chat/panel.ts`) now instruct checking the catalog *before* falling back to other tools and calling a matching tool proactively, without waiting to be asked by name.
+
 ## [1.8.1] - 2026-08-11
 
 ### Fixed

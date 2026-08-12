@@ -43,7 +43,7 @@ const GUIDELINE_SPECS: GuidelineSpec[] = [
     text: `**Skills Catalog**: A catalog of available reusable skills (reference patterns, boilerplate, lessons learned) is listed below under "Available Skills", when any exist. When a catalog entry looks relevant to the current task, call 'use_skill' with its id to load the full content before writing code. You cannot create or edit skills yourself — if you discover something worth saving as a new skill, tell the user to save it via the Skills panel or the /skills command, don't attempt to write it to a file.`,
   },
   {
-    text: `**MCP Tools Catalog**: A catalog of connected MCP (Model Context Protocol) servers and their tools is listed below under "Available MCP Tools", when any are connected. Call 'call_mcp_tool' with the server id and tool name shown there to use one — never invent a server id or tool name that isn't listed.`,
+    text: `**MCP Tools Catalog**: A catalog of connected MCP (Model Context Protocol) servers and their tools is listed below under "Available MCP Tools", when any are connected. Check it *before* you start reasoning from general knowledge, grepping the codebase, or reaching for web_search/web_fetch — if a listed tool's description covers what you need (e.g. a codebase-graph query, a live database/API lookup, a design-tool integration), call it proactively via 'call_mcp_tool' the same turn, without waiting for the user to name the server or tool explicitly. Only fall back to your own tools/knowledge when nothing in the catalog fits. Call 'call_mcp_tool' with the server id and tool name shown there — never invent a server id or tool name that isn't listed.`,
     requiresAny: ['call_mcp_tool'],
   },
   {
