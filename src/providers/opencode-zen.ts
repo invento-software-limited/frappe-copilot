@@ -105,7 +105,7 @@ export class OpenCodeZenProvider implements LLMProvider {
       model: options?.model || this.model,
       messages: messages.map(toOpenAIMessage),
       temperature: options?.temperature ?? this.temperature,
-      max_tokens: options?.maxTokens ?? 4096,
+      max_tokens: options?.maxTokens ?? 8192,
       stream,
     };
   }
@@ -135,10 +135,10 @@ export class OpenCodeZenProvider implements LLMProvider {
       truncated: data.choices[0]?.finish_reason === 'length',
       usage: data.usage
         ? {
-            promptTokens: data.usage.prompt_tokens,
-            completionTokens: data.usage.completion_tokens,
-            totalTokens: data.usage.total_tokens,
-          }
+          promptTokens: data.usage.prompt_tokens,
+          completionTokens: data.usage.completion_tokens,
+          totalTokens: data.usage.total_tokens,
+        }
         : undefined,
     };
   }
@@ -234,10 +234,10 @@ export class OpenCodeZenProvider implements LLMProvider {
                   truncated,
                   usage: chunk.usage
                     ? {
-                        promptTokens: chunk.usage.prompt_tokens,
-                        completionTokens: chunk.usage.completion_tokens,
-                        totalTokens: chunk.usage.total_tokens,
-                      }
+                      promptTokens: chunk.usage.prompt_tokens,
+                      completionTokens: chunk.usage.completion_tokens,
+                      totalTokens: chunk.usage.total_tokens,
+                    }
                     : undefined,
                 };
               }

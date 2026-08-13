@@ -332,10 +332,10 @@ export class AnthropicProvider implements LLMProvider {
     if (this.extendedThinking) {
       // Extended thinking requires max_tokens to exceed the thinking budget,
       // and forbids overriding temperature (the API pins it to 1 internally).
-      body.max_tokens = Math.max(maxTokens || 4096, this.thinkingBudgetTokens + 1024);
+      body.max_tokens = Math.max(maxTokens || 16384, this.thinkingBudgetTokens + 8192);
       body.thinking = { type: 'enabled', budget_tokens: this.thinkingBudgetTokens };
     } else {
-      body.max_tokens = maxTokens || 4096;
+      body.max_tokens = maxTokens || 8192;
       if (temp !== undefined) {
         body.temperature = temp;
       }

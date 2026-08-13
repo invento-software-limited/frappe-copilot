@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.9.1] - 2026-08-13
+
+### Fixed
+
+- **Response Truncation & Token Budget Guardrails** — Resolved premature output cutting on large reasoning or code generation steps:
+  - Increased `ChatPanel` streaming `maxTokens` step ceiling from `8,192` to `16,384`.
+  - Updated OpenCode Zen provider default `max_tokens` from `4,096` to `8,192`.
+  - Re-allocated Anthropic provider token limits when extended thinking is enabled, reserving `thinkingBudgetTokens + 8,192` (minimum `16,384` total) so extended thinking does not exhaust the available completion tokens.
+
 ## [1.9.0] - 2026-08-12
 
 ### Added

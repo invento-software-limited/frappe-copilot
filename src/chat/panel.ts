@@ -1770,7 +1770,7 @@ export class ChatPanel {
     var full = '', fullReasoning = '', truncated = false, id = '' + Date.now();
     this.postWebviewMessage({ type: 'startStream', messageId: id });
     try {
-      const options: any = { maxTokens: 8192 };
+      const options: any = { maxTokens: 16384 };
       if (this.activeModel) {
         options.model = this.activeModel;
       }
