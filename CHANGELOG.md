@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.2] - 2026-09-03
+
+### Fixed
+
+- **Thought Process Panel Rendered as an Unformatted Text Block** — The reasoning/thought panel in `assets/webview/chat.html` set the streamed content via `element.textContent` under `white-space: pre-wrap`, so `#`/`-`/`**bold**` markers were never converted to real markup — unlike the main answer bubble, which already runs the same text through the existing `md()` markdown-to-HTML renderer. Reasoning is now rendered through `md()` too (both mid-stream and on completion), and `.thought-body` gets its own heading/paragraph/list spacing (14px above headings, 10px paragraph gaps, 5–6px list-item spacing) instead of inheriting the tighter defaults tuned for regular chat bubbles, so multi-section reasoning summaries read as a structured document instead of a dense wall of text.
+- **`introspect_doctype` Missing from the Research / Read-only Agent** — `src/agents/definitions/research.ts`'s `allowedTools` omitted `introspect_doctype` and `list_customizations`, even though both are pure reads (`frappe.get_meta()` / `frappe.get_all()`, no writes) already whitelisted for every other specialist agent (`architecture`, `serverLogic`, `devopsDebug`, `doctypeBuilder`, `clientUi`). Any DocType-introspection request routed to Research fell back to grepping and reading the raw DocType JSON by hand, missing live Custom Fields/Property Setters the JSON source doesn't contain. Added both tools to the allowlist and a prompt line telling the agent to prefer them over manual file reads.
+
 ## [1.9.1] - 2026-08-13
 
 ### Fixed

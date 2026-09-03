@@ -95,6 +95,19 @@ body{font-family:var(--vscode-font-family,-apple-system,sans-serif);font-size:va
 .bub h1, .bub h2, .bub h3, .bub h4, .bub h5, .bub h6{font-size:13px;font-weight:600;margin:6px 0 2px;}
 .bub ul, .bub ol{margin:2px 0;padding-left:18px;}
 .bub li{margin:2px 0;}
+.thought-body{white-space:normal;}
+.thought-body h1, .thought-body h2, .thought-body h3, .thought-body h4, .thought-body h5, .thought-body h6{
+  font-size:12px;font-weight:700;opacity:1;color:var(--vscode-foreground,#ccc);margin:14px 0 6px;
+}
+.thought-body h1:first-child, .thought-body h2:first-child, .thought-body h3:first-child,
+.thought-body h4:first-child, .thought-body h5:first-child, .thought-body h6:first-child{margin-top:0;}
+.thought-body p{margin:0 0 10px;}
+.thought-body p:last-child{margin-bottom:0;}
+.thought-body ul, .thought-body ol{margin:6px 0 12px;padding-left:20px;}
+.thought-body li{margin:5px 0;}
+.thought-body li strong, .thought-body p strong{opacity:1;color:var(--vscode-foreground,#ccc);}
+.thought-body code{font-size:11px;}
+.thought-body hr{border:none;border-top:1px solid rgba(255,255,255,0.08);margin:12px 0;}
 .code-container pre {
   margin: 0 !important;
   background: none !important;
@@ -2217,13 +2230,13 @@ window.onerror = function(message, source, lineno, colno, error) {
               '<span>🧠 Thought Process</span>' +
               '<span class="thought-toggle" style="font-size:9px; text-decoration:underline;">[Collapse]</span>' +
             '</div>' +
-            '<div class="thought-body" style="white-space:pre-wrap; font-family:var(--vscode-font-family, sans-serif); line-height:1.45; opacity:0.85;"></div>' +
+            '<div class="thought-body" style="font-family:var(--vscode-font-family, sans-serif); line-height:1.5; opacity:0.85;"></div>' +
           '</div>';
       }
       seRawThought += reasoning;
       var body = seThought.querySelector('.thought-body');
       if (body) {
-        body.textContent = seRawThought;
+        body.innerHTML = md(seRawThought);
       }
     }
     
@@ -2265,12 +2278,12 @@ window.onerror = function(message, source, lineno, colno, error) {
               '<span>🧠 Thought Process</span>' +
               '<span class="thought-toggle" style="font-size:9px; text-decoration:underline;">[Expand]</span>' +
             '</div>' +
-            '<div class="thought-body" style="white-space:pre-wrap; font-family:var(--vscode-font-family, sans-serif); line-height:1.45; opacity:0.85; display:none;"></div>' +
+            '<div class="thought-body" style="font-family:var(--vscode-font-family, sans-serif); line-height:1.5; opacity:0.85; display:none;"></div>' +
           '</div>';
       }
       var body = seThought.querySelector('.thought-body');
       if (body) {
-        body.textContent = fullReasoning;
+        body.innerHTML = md(fullReasoning);
       }
     }
     
