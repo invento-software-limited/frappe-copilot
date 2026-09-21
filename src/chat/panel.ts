@@ -104,10 +104,12 @@ interface AgentStepResult {
   stopLoop: boolean;
 }
 
-export class ChatPanel {
+export class ChatPanel implements vscode.WebviewViewProvider {
   public static readonly viewType = 'frappeCopilot.chat';
+  public static readonly sideViewType = 'frappe-copilot.agentChat';
 
   private panel: vscode.WebviewPanel | null = null;
+  private webviewView: vscode.WebviewView | null = null;
   private disposables: vscode.Disposable[] = [];
   private vectorStoreWatchers: vscode.Disposable[] = [];
   private uploadsDir: string = '';
@@ -162,21 +164,70 @@ export class ChatPanel {
     this.toolExecutor = new ToolExecutor(root, benchEnv, this.skillsStore, this.mcpManager);
   }
 
-  show(): void {
+  /** Called by VS Code when resolving the WebviewView in the Secondary Side Bar */
+  resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
+  ): void {
+    this.webviewView = webviewView;
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.file(this.extensionPath)]
+    };
+    webviewView.webview.html = this.getWebviewContent();
+    webviewView.onDidDispose(() => {
+      this.webviewView = null;
+    }, null, this.disposables);
+    webviewView.webview.onDidReceiveMessage(
+      async (m) => { await this.handleMsg(m); },
+      null,
+      this.disposables
+    );
+  }
+
+  /** Reveals or opens the chat. By default focuses the Secondary Side Bar view. */
+  show(inTab: boolean = false): void {
+    if (inTab) {
+      this.showInTab();
+      return;
+    }
+    if (this.webviewView) {
+      this.webviewView.show(false);
+    } else {
+      vscode.commands.executeCommand('frappe-copilot.agentChat.focus');
+    }
+  }
+
+  /** Explicitly opens/reveals the chat as an editor tab (ViewColumn.Two) */
+  showInTab(): void {
     if (this.panel) {
       this.panel.reveal(vscode.ViewColumn.Two, false);
       return;
     }
     this.panel = vscode.window.createWebviewPanel(
-      ChatPanel.viewType, 'Frappe Copilot', vscode.ViewColumn.Two,
+      ChatPanel.viewType,
+      'Frappe Copilot',
+      vscode.ViewColumn.Two,
       { enableScripts: true, retainContextWhenHidden: true }
     );
     this.panel.iconPath = vscode.Uri.file(
       path.join(this.extensionPath, 'assets', 'icon.svg')
     );
     this.panel.webview.html = this.getWebviewContent();
-    this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
-    this.panel.webview.onDidReceiveMessage(async (m) => { await this.handleMsg(m); }, null, this.disposables);
+    this.panel.onDidDispose(() => {
+      this.panel = null;
+    }, null, this.disposables);
+    this.panel.webview.onDidReceiveMessage(
+      async (m) => { await this.handleMsg(m); },
+      null,
+      this.disposables
+    );
+  }
+
+  /** Whether the Secondary Side Bar agent view is currently visible */
+  isViewVisible(): boolean {
+    return !!this.webviewView?.visible;
   }
 
   private async hasApiKey(): Promise<boolean> { try { return await (this.provider as any).hasApiKey(); } catch { return false; } }
@@ -200,10 +251,14 @@ export class ChatPanel {
   private say(type: string, data: any) {
     const payload = { type, ...(typeof data === 'object' ? data : { status: data }) };
     this.panel?.webview.postMessage(payload);
+    this.webviewView?.webview.postMessage(payload);
   }
   private chat(role: string, content: string) { this.say('addMessage', { message: { role, content } }); }
 
-  close(): void { this.panel?.dispose(); }
+  close(): void {
+    this.panel?.dispose();
+    this.panel = null;
+  }
   insertCodeMention(mention: any): void {
     this.say('insertCodeMention', { mention });
   }
@@ -1801,10 +1856,12 @@ export class ChatPanel {
 
   private postWebviewMessage(msg: any) {
     this.panel?.webview.postMessage(msg);
+    this.webviewView?.webview.postMessage(msg);
   }
 
   dispose(): void {
     this.panel = null;
+    this.webviewView = null;
     this.disposables.forEach(d => d.dispose());
     this.disposables = [];
   }

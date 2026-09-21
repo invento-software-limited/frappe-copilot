@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.10.0] - 2026-09-21
+
+### Added
+
+- **Secondary Side Bar (Agent Panel) Integration** — Registered `ChatPanel` as a `WebviewViewProvider` (`frappe-copilot.agentChat`) docked in the secondary side bar (`frappe-copilot-agent`), allowing Frappe Copilot to run as an embedded agent side panel with `retainContextWhenHidden: true`.
+- **Open Chat in Editor Tab** — Added command `frappe-copilot.openChatInTab` and header icon (`$(link-external)`) to easily pop out or reveal the chat in an editor tab column (`ViewColumn.Two`).
+- **Global Keybinding & Toggle Behavior** — Bound `Ctrl+Alt+B` (`Cmd+Alt+B` on macOS) to `frappe-copilot.start`. Triggering it toggles the auxiliary side bar closed when already focused, or focuses the agent panel when hidden.
+- **View Title Bar Quick Actions** — Added "New Session" (`$(add)`) and "Open Chat in Editor Tab" buttons directly to the secondary sidebar header.
+
 ## [1.9.2] - 2026-09-03
 
 ### Fixed

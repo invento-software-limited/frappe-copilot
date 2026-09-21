@@ -136,6 +136,23 @@ export function activate(context: vscode.ExtensionContext) {
     );
   }
 
+  if (sessionManager) {
+    chatPanel = new ChatPanel(
+      extensionPath,
+      provider,
+      sessionManager,
+      benchEnv,
+      mcpManager
+    );
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        'frappe-copilot.agentChat',
+        chatPanel,
+        { webviewOptions: { retainContextWhenHidden: true } }
+      )
+    );
+  }
+
   // Listen for config changes
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
@@ -158,8 +175,14 @@ export function deactivate() {
 
 function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
-    vscode.commands.registerCommand('frappe-copilot.start', () => {
-      openChat();
+    vscode.commands.registerCommand('frappe-copilot.start', async () => {
+      await openChat();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.openChatInTab', async () => {
+      await openChat(true);
     })
   );
 
@@ -358,8 +381,11 @@ async function runApiKeySetup(): Promise<void> {
 
 // ─── Core Actions ────────────────────────────────────────────────────────────
 
-/** Open the chat panel — runs initial setup first if needed. */
-async function openChat() {
+/** Open the chat panel — runs initial setup first if needed.
+ *  By default opens/toggles in the Secondary Side Bar (agent panel), replacing Antigravity agent panel.
+ *  If inTab is true, opens as an editor tab in ViewColumn.Two.
+ */
+async function openChat(inTab: boolean = false) {
   if (!sessionManager) {
     const frappeCopilotPath = initializeWorkspaceStructure();
     if (!frappeCopilotPath) {
@@ -390,9 +416,32 @@ async function openChat() {
       benchEnv,
       mcpManager
     );
+    extensionContext?.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(
+        'frappe-copilot.agentChat',
+        chatPanel,
+        { webviewOptions: { retainContextWhenHidden: true } }
+      )
+    );
   }
 
-  chatPanel.show();
+  if (inTab) {
+    chatPanel.showInTab();
+    return;
+  }
+
+  // Toggle behavior: if the secondary sidebar agent view is already visible, toggle/close it
+  if (chatPanel.isViewVisible()) {
+    await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+    return;
+  }
+
+  // Focus the agent view in Secondary Side Bar (replaces Antigravity agent panel)
+  try {
+    await vscode.commands.executeCommand('frappe-copilot.agentChat.focus');
+  } catch {
+    chatPanel.show();
+  }
 }
 
 /** Detect bench environment and update all services. */

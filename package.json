@@ -2,7 +2,7 @@
   "name": "frappe-copilot",
   "displayName": "Frappe Copilot",
   "description": "AI-powered Frappe/ERPNext development assistant. Integrates with OpenCode Zen for agentic code generation, bench management, and Frappe app scaffolding.",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/invento-software-limited/frappe-copilot.git"
@@ -25,11 +25,20 @@
     "copilot"
   ],
   "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:frappe-copilot.agentChat"
+  ],
   "contributes": {
     "commands": [
       {
         "command": "frappe-copilot.start",
         "title": "Frappe Copilot: Open Chat"
+      },
+      {
+        "command": "frappe-copilot.openChatInTab",
+        "title": "Frappe Copilot: Open Chat in Editor Tab",
+        "icon": "$(link-external)"
       },
       {
         "command": "frappe-copilot.setupBench",
@@ -41,7 +50,8 @@
       },
       {
         "command": "frappe-copilot.newSession",
-        "title": "Frappe Copilot: New Session"
+        "title": "Frappe Copilot: New Session",
+        "icon": "$(add)"
       },
       {
         "command": "frappe-copilot.runBenchCommand",
@@ -83,9 +93,23 @@
           "title": "Frappe Copilot",
           "icon": "assets/icon.svg"
         }
+      ],
+      "secondarySidebar": [
+        {
+          "id": "frappe-copilot-agent",
+          "title": "Frappe Copilot",
+          "icon": "assets/icon.svg"
+        }
       ]
     },
     "views": {
+      "frappe-copilot-agent": [
+        {
+          "type": "webview",
+          "id": "frappe-copilot.agentChat",
+          "name": "Frappe Copilot"
+        }
+      ],
       "frappe-copilot": [
         {
           "type": "tree",
@@ -299,6 +323,11 @@
     },
     "keybindings": [
       {
+        "command": "frappe-copilot.start",
+        "key": "ctrl+alt+b",
+        "mac": "cmd+alt+b"
+      },
+      {
         "command": "frappe-copilot.mentionCode",
         "key": "ctrl+alt+m",
         "mac": "cmd+alt+m",
@@ -307,6 +336,16 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "frappe-copilot.openChatInTab",
+          "when": "view == frappe-copilot.agentChat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "frappe-copilot.newSession",
+          "when": "view == frappe-copilot.agentChat",
+          "group": "navigation@2"
+        },
         {
           "command": "frappe-copilot.newSession",
           "when": "view == frappe-copilot.sessions",
