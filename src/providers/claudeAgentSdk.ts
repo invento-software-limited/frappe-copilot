@@ -1,6 +1,9 @@
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { Message, ChatOptions, ChatResponse, ImageAttachment } from '../types';
 import { LLMProvider } from './interface';
+import { CLAUDE_FALLBACK_MODELS } from './anthropic';
+import { capsFor, clampEffort } from './modelCaps';
 
 /**
  * @anthropic-ai/claude-agent-sdk ships as an ESM-only package ("type": "module").
@@ -48,6 +51,8 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
   private model: string = 'claude-sonnet-5';
   private extendedThinking: boolean = false;
   private thinkingBudgetTokens: number = 10000;
+  /** Optional system `claude` binary; empty uses the SDK's bundled CLI. */
+  private executablePath = '';
   private sdkPromise: Promise<ClaudeAgentSdk> | undefined;
   private runs = new Map<string, RunCheckpoint>();
 
@@ -56,6 +61,7 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     this.model = config.get<string>('model', 'claude-sonnet-5');
     this.extendedThinking = config.get<boolean>('extendedThinking', false);
     this.thinkingBudgetTokens = config.get<number>('thinkingBudgetTokens', 10000);
+    this.executablePath = config.get<string>('executablePath', '').trim().replace(/^~(?=$|\/)/, os.homedir());
   }
 
   private getSdk(): Promise<ClaudeAgentSdk> {
@@ -75,6 +81,10 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
 
   async getAuthMode(): Promise<'api-key' | 'oauth' | 'none'> {
     return (await this.isAvailable()) ? 'oauth' : 'none';
+  }
+
+  getModelId(): string {
+    return this.model;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -252,6 +262,15 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     }
   }
 
+  /** The SDK runs its own bundled Claude Code CLI, so the CLI's usual advice
+   *  ("run claude update") doesn't apply — point at what actually fixes it. */
+  private explainCliError(e: any): Error {
+    const msg = String(e?.message || e);
+    if (!/does not support this model|or newer is required/i.test(msg)) return e;
+    const using = this.executablePath ? `the Claude Code CLI at ${this.executablePath}` : 'the Claude Code CLI bundled with this extension';
+    return new Error(`${msg}\n\nThis request used ${using}. Either pick an older model, update that CLI (\`claude update\` if it's your own install), or set "frappe-copilot.claudeCode.executablePath" to a newer \`claude\` binary (run \`which claude\` to find it).`);
+  }
+
   private describeResultError(msg: any): string {
     const parts: string[] = [];
     if (msg.subtype && msg.subtype !== 'success') parts.push(String(msg.subtype).replace(/_/g, ' '));
@@ -303,23 +322,26 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
     if (resume) {
       sdkOptions.resume = resume;
     }
+    if (this.executablePath) {
+      sdkOptions.pathToClaudeCodeExecutable = this.executablePath;
+    }
     if (system) {
       sdkOptions.systemPrompt = this.buildSystemPromptOption(sdk, system, systemStaticPrefixLength);
     }
-    if (this.extendedThinking) {
-      // `adaptive` only works on Opus-class models (the SDK decides when/how much
-      // to think for those); every model this provider offers, including the
-      // default (claude-sonnet-5), needs the model-agnostic fixed-budget form
-      // instead or the SDK silently emits no thinking_delta events at all.
-      //
-      // Even with `thinking` enabled, the API defaults to a "redacted" thinking
-      // phase — it streams only periodic token-count pings, no visible text —
-      // unless summaries are explicitly requested. `display: 'summarized'` is
-      // the per-request knob for that; `showThinkingSummaries` is the session-
-      // level one the Claude Code CLI's own transcript view (ctrl+o) uses. Both
-      // are needed, or thinking_delta events arrive with empty/no `thinking` text.
+    // Current Claude models think adaptively (budget_tokens is rejected) and
+    // some think even with the setting off; their default display streams
+    // empty thinking text, so ask for summaries. Effort controls depth.
+    const caps = capsFor(modelToUse);
+    if (caps.thinking === 'adaptive' && (this.extendedThinking || caps.thinksByDefault)) {
+      sdkOptions.thinking = { type: 'adaptive', display: 'summarized' };
+      sdkOptions.showThinkingSummaries = true;
+    } else if (caps.thinking === 'budget' && this.extendedThinking) {
       sdkOptions.thinking = { type: 'enabled', budgetTokens: this.thinkingBudgetTokens, display: 'summarized' };
       sdkOptions.showThinkingSummaries = true;
+    }
+    const effort = clampEffort(options?.effort, caps);
+    if (effort) {
+      sdkOptions.effort = effort;
     }
 
     let resultText: string | undefined;
@@ -377,7 +399,7 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
       }
     } catch (e: any) {
       if (abortSignal?.aborted || e?.name === 'AbortError') return;
-      throw e;
+      throw this.explainCliError(e);
     }
 
     if (errorMessage) {
@@ -393,6 +415,6 @@ export class ClaudeAgentSdkProvider implements LLMProvider {
   }
 
   async getModels(): Promise<string[]> {
-    return ['claude-sonnet-5', 'claude-opus-4-8', 'claude-haiku-4-5-20251001', 'claude-fable-5'];
+    return CLAUDE_FALLBACK_MODELS;
   }
 }

@@ -167,6 +167,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
   chatPanel?.disposeVectorStoreWatchers();
+  chatPanel?.disposeBackgroundCommands();
   chatPanel?.close();
   mcpManager?.dispose().catch(() => { /* best-effort on shutdown */ });
 }

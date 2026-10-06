@@ -5,7 +5,7 @@ export const researchAgent: AgentDefinition = {
   label: 'Research / Read-only',
   icon: '🔎',
   description: 'Web search/fetch and read-only codebase lookups — no file writes or command execution.',
-  allowedTools: ['read_file', 'list_dir', 'grep_search', 'introspect_doctype', 'list_customizations', 'web_search', 'web_fetch', 'update_todo_list', 'use_skill', 'call_mcp_tool'],
+  allowedTools: ['read_file', 'list_dir', 'grep_search', 'introspect_doctype', 'list_customizations', 'web_search', 'web_fetch', 'update_todo_list', 'use_skill', 'call_mcp_tool', 'glob', 'search_knowledge', 'list_doctypes'],
   highRiskTools: ['call_mcp_tool'],
   promptSection: `### Research / Read-only Focus
 - You cannot write files, edit files, or execute commands in this role — your job is to find and summarize information, not to change the workspace.

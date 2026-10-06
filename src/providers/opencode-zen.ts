@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Message, ChatOptions, ChatResponse } from '../types';
 import { LLMProvider } from './interface';
-import { toOpenAIMessage } from './openaiMessage';
+import { toOpenAIMessages, toOpenAITools, OpenAIToolAccumulator, samplingParams } from './openaiMessage';
 
 /** Response shape from OpenAI-compatible /chat/completions endpoint. */
 interface OpenCodeZenResponse {
@@ -12,7 +12,7 @@ interface OpenCodeZenResponse {
   choices: {
     index: number;
     message?: { role: string; content: string };
-    delta?: { role?: string; content?: string };
+    delta?: { role?: string; content?: string; tool_calls?: any[] };
     finish_reason: string | null;
   }[];
   usage?: {
@@ -103,10 +103,11 @@ export class OpenCodeZenProvider implements LLMProvider {
   ): Record<string, unknown> {
     return {
       model: options?.model || this.model,
-      messages: messages.map(toOpenAIMessage),
-      temperature: options?.temperature ?? this.temperature,
+      messages: toOpenAIMessages(messages),
+      ...samplingParams(options?.model || this.model, options?.temperature ?? this.temperature, options?.effort),
       max_tokens: options?.maxTokens ?? 8192,
       stream,
+      ...(options?.tools?.length ? { tools: toOpenAITools(options.tools), tool_choice: 'auto' } : {}),
     };
   }
 
@@ -197,8 +198,13 @@ export class OpenCodeZenProvider implements LLMProvider {
 
       const decoder = new TextDecoder();
       let buffer = '';
+      const toolAcc = new OpenAIToolAccumulator();
+      let reasoningText = '';
+      let lengthCut = false;
+      let usage: ChatResponse['usage'];
 
       try {
+        readLoop:
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -212,7 +218,7 @@ export class OpenCodeZenProvider implements LLMProvider {
             if (!trimmed || !trimmed.startsWith('data: ')) continue;
 
             const dataStr = trimmed.slice(6).trim();
-            if (dataStr === '[DONE]') return;
+            if (dataStr === '[DONE]') break readLoop;
 
             try {
               const chunk = JSON.parse(dataStr) as OpenCodeZenResponse;
@@ -226,6 +232,12 @@ export class OpenCodeZenProvider implements LLMProvider {
               // to catch it) looks like a complete answer and the agent loop
               // silently ends the run with a chopped-off reply.
               const truncated = choice?.finish_reason === 'length';
+              toolAcc.add(deltaObj?.tool_calls);
+              if (chunk.usage) {
+                usage = { promptTokens: chunk.usage.prompt_tokens, completionTokens: chunk.usage.completion_tokens, totalTokens: chunk.usage.total_tokens };
+              }
+              reasoningText += reasoning;
+              if (truncated) lengthCut = true;
               if (delta || reasoning || truncated) {
                 yield {
                   content: delta,
@@ -249,11 +261,30 @@ export class OpenCodeZenProvider implements LLMProvider {
       } finally {
         reader.releaseLock();
       }
+      const toolCalls = toolAcc.finish();
+      if (toolCalls.length || usage || (toolAcc.incompleteToolCall && !lengthCut)) {
+        yield {
+          content: '',
+          model: this.model,
+          usage,
+          truncated: toolAcc.incompleteToolCall,
+          toolCalls: toolCalls.length ? toolCalls : undefined,
+          thinkingBlocks: toolCalls.length && reasoningText ? [{ thinking: reasoningText }] : undefined,
+        };
+      }
       return; // success — exit the retry loop
     }
 
     // All retries exhausted
     throw lastError || new Error('OpenCode Zen API request failed after retries.');
+  }
+
+  supportsNativeTools(): boolean {
+    return true;
+  }
+
+  getModelId(): string {
+    return this.model;
   }
 
   async isAvailable(): Promise<boolean> {

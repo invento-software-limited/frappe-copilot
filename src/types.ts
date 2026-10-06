@@ -19,10 +19,50 @@ export interface ImageAttachment {
   data?: string;
 }
 
+/** A tool invocation the model requested through the provider's native
+ *  tool-calling API (Anthropic tool_use / OpenAI tool_calls). */
+export interface ToolCall {
+  id: string;
+  name: string;
+  input: Record<string, any>;
+}
+
+/** The answer to one ToolCall, sent back on the following user turn. */
+export interface ToolResultBlock {
+  toolCallId: string;
+  name: string;
+  content: string;
+  isError?: boolean;
+}
+
+/** A reasoning block that must be echoed back verbatim alongside tool calls —
+ *  Anthropic rejects a tool-use turn whose signed thinking was dropped, and
+ *  DeepSeek-style APIs expect reasoning_content back within a tool loop. */
+export interface ThinkingBlock {
+  thinking: string;
+  signature?: string;
+  /** Opaque payload of an Anthropic redacted_thinking block. */
+  redacted?: string;
+}
+
+/** A tool advertised to the model through a native tool-calling API. */
+export interface ToolSpec {
+  name: string;
+  description: string;
+  /** JSON Schema for the tool's input object. */
+  parameters: Record<string, any>;
+}
+
 /** A single message in a chat conversation. */
 export interface Message {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** Assistant turn: native tool calls the model made. */
+  toolCalls?: ToolCall[];
+  /** Assistant turn: reasoning to replay with toolCalls (see ThinkingBlock). */
+  thinkingBlocks?: ThinkingBlock[];
+  /** User turn: results answering the previous assistant turn's toolCalls. */
+  toolResults?: ToolResultBlock[];
   /** For a system message: length of the leading slice of `content` that is
    *  static per-agent boilerplate (identity, guidelines, tool docs) as opposed
    *  to per-turn dynamic context (RAG snippets, schema directory, skills/MCP
@@ -66,6 +106,12 @@ export interface ChatOptions {
    *  transcript on every tool-call round trip. Providers that don't support
    *  session resume can ignore it. */
   runId?: string;
+  /** Tools to expose through the provider's native tool-calling API. Only
+   *  sent by callers that checked LLMProvider.supportsNativeTools(). */
+  tools?: ToolSpec[];
+  /** Reasoning effort; providers clamp it to what the model supports and
+   *  omit it for models without effort control. Unset = model default. */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /** Called when a transient error triggers a retry (attempt = 1-based retry count, delaySec = wait before next attempt). */
   onRetry?: (attempt: number, delaySec: number, error: string) => void;
 }
@@ -90,6 +136,10 @@ export interface ChatResponse {
    *  is indistinguishable from a complete answer and the agent loop silently
    *  ends the run with a chopped-off reply. See ChatPanel.runOneAgentStep. */
   truncated?: boolean;
+  /** Complete native tool calls — yielded once, on the final stream chunk. */
+  toolCalls?: ToolCall[];
+  /** Reasoning to replay with toolCalls — yielded alongside them. */
+  thinkingBlocks?: ThinkingBlock[];
 }
 
 /** Provider interface — all LLM providers implement this. */

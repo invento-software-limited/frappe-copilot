@@ -5,7 +5,7 @@ export const architectureAgent: AgentDefinition = {
   label: 'Architecture / Planning',
   icon: '📐',
   description: 'Cross-cutting design/architecture questions — produces a plan or recommendation, does not apply code changes directly.',
-  allowedTools: ['read_file', 'list_dir', 'grep_search', 'introspect_doctype', 'list_customizations', 'ask_clarification', 'update_todo_list', 'use_skill', 'call_mcp_tool'],
+  allowedTools: ['read_file', 'list_dir', 'grep_search', 'introspect_doctype', 'list_customizations', 'ask_clarification', 'update_todo_list', 'use_skill', 'call_mcp_tool', 'glob', 'search_knowledge', 'list_doctypes'],
   highRiskTools: ['call_mcp_tool'],
   promptSection: `### Architecture / Planning Focus
 - You have no write_file/edit_file/execute_command access — your output is a plan, not a diff. Investigate thoroughly (read relevant files, introspect relevant DocTypes) before proposing an approach.

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import * as yaml from 'js-yaml';
-import { spawn } from 'child_process';
+import { spawn, ChildProcess } from 'child_process';
 import { BenchEnvironment } from '../types';
 import { ToolName } from './types';
 import { readConfig } from '../workspace/structure';
@@ -10,22 +10,54 @@ import { SkillsStore } from './skillsStore';
 import { isAutoApprove } from './approvalMode';
 import { MCPManager } from '../mcp/manager';
 import { getCommandById, resolveCommand } from '../bench/commands';
+import { SiteResolver } from '../bench/siteResolver';
+import { ToolResult } from './tools/result';
+import { FileTools } from './tools/fileTools';
+import { SearchTools } from './tools/searchTools';
+import { BackgroundShells, killTree } from './tools/backgroundShells';
+import { asBool, asInt, asString, stringifyArgs } from './tools/args';
 
-export interface ToolResult {
-  success: boolean;
-  output: string;
-}
+export { ToolResult } from './tools/result';
+
+/** Foreground commands longer than this are killed — background them instead. */
+const DEFAULT_COMMAND_TIMEOUT_MS = 20 * 60 * 1000;
+const MAX_COMMAND_TIMEOUT_MS = 60 * 60 * 1000;
 
 export class ToolExecutor {
+  private files: FileTools;
+  private search: SearchTools;
+  readonly background = new BackgroundShells();
+  /** Finds the site to use when a tool call doesn't name one. */
+  readonly sites = new SiteResolver(script => this.runInBench(script));
+  private siteError = 'Error: no site to run against.';
+  /** Foreground commands in flight — killed when the user stops the run. */
+  private running = new Set<ChildProcess>();
+
   constructor(
     private workspaceRoot: string,
     private benchEnv: BenchEnvironment | null,
     private skillsStore: SkillsStore | null = null,
     private mcpManager: MCPManager | null = null
-  ) {}
+  ) {
+    const resolve = (rel: string) => this.resolvePath(rel);
+    this.files = new FileTools(resolve);
+    this.search = new SearchTools(resolve, () => this.activeRoot());
+  }
+
+  /** Stops every foreground command (the user pressed stop). Background
+   *  commands keep running until kill_command or deactivate. */
+  killRunningCommands(): void {
+    for (const child of this.running) killTree(child);
+    this.running.clear();
+  }
+
+  private activeRoot(): string {
+    return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || this.workspaceRoot;
+  }
 
   setBenchEnv(env: BenchEnvironment | null) {
     this.benchEnv = env;
+    this.sites.reset();
   }
 
   /** Run a tool by name and arguments. `allowedTools` is the calling agent's
@@ -35,27 +67,36 @@ export class ToolExecutor {
    *  prior tool result (e.g. injected instructions in a fetched web page). */
   async runTool(
     name: string,
-    args: Record<string, string>,
+    rawArgs: Record<string, any>,
     allowedTools: ToolName[],
     onOutputChunk?: (chunk: string) => void
   ): Promise<ToolResult> {
     if (!allowedTools.includes(name as ToolName)) {
       return { success: false, output: `Tool '${name}' is not permitted for this agent. Available tools: ${allowedTools.join(', ')}` };
     }
+    const args = stringifyArgs(rawArgs);
     try {
       switch (name) {
         case 'read_file':
-          return await this.readFile(args.path);
+          return await this.files.read(rawArgs);
         case 'write_file':
-          return await this.writeFile(args.path, args.content);
+          return await this.files.write(rawArgs);
         case 'edit_file':
-          return await this.editFile(args.path, args.search, args.replace);
+          return await this.files.edit(rawArgs);
+        case 'multi_edit':
+          return await this.files.multiEdit(rawArgs);
         case 'list_dir':
           return await this.listDir(args.path);
         case 'grep_search':
-          return await this.grepSearch(args.query);
+          return await this.search.grep(rawArgs);
+        case 'glob':
+          return await this.search.glob(rawArgs);
         case 'execute_command':
-          return await this.executeCommand(args.command, onOutputChunk);
+          return await this.runCommandTool(rawArgs, onOutputChunk);
+        case 'command_output':
+          return this.background.read(args.id, args.filter);
+        case 'kill_command':
+          return this.background.kill(args.id);
         case 'introspect_doctype':
           return await this.introspectDocType(args.doctype, args.site);
         case 'list_customizations':
@@ -92,6 +133,18 @@ export class ToolExecutor {
     }
   }
 
+  private async runCommandTool(args: Record<string, any>, onChunk?: (chunk: string) => void): Promise<ToolResult> {
+    const command = asString(args.command);
+    if (!command) return { success: false, output: 'Missing command parameter' };
+    if (asBool(args.run_in_background)) {
+      const { cmdToRun, spawnOptions } = this.buildSpawn(command);
+      return this.background.start(command, cmdToRun, spawnOptions);
+    }
+    const seconds = asInt(args.timeout);
+    const timeoutMs = seconds ? Math.min(seconds * 1000, MAX_COMMAND_TIMEOUT_MS) : DEFAULT_COMMAND_TIMEOUT_MS;
+    return this.executeCommand(command, onChunk, timeoutMs);
+  }
+
   private async resolvePath(relPath: string): Promise<string> {
     const activeRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || this.workspaceRoot;
     let fullPath = path.resolve(activeRoot, relPath);
@@ -115,79 +168,6 @@ export class ToolExecutor {
       }
     }
     return fullPath;
-  }
-
-  async readFile(relPath: string): Promise<ToolResult> {
-    if (!relPath) return { success: false, output: 'Missing path parameter' };
-    const fullPath = await this.resolvePath(relPath);
-    if (!fs.existsSync(fullPath)) {
-      return { success: false, output: `File not found: ${relPath}` };
-    }
-    const stat = fs.statSync(fullPath);
-    if (stat.isDirectory()) {
-      return { success: false, output: `'${relPath}' is a directory. Use list_dir tool instead.` };
-    }
-
-    // Size guardrail: a 1MB file is ~250k tokens in a single tool result, which
-    // alone can blow a step's context budget. 150KB (~35k tokens) still covers
-    // any real source file while keeping one read_file call from dominating the prompt.
-    const maxBytes = 150 * 1024;
-    if (stat.size > maxBytes) {
-      return {
-        success: false,
-        output: `Error: File '${relPath}' is too large (${(stat.size / 1024).toFixed(0)}KB). Maximum allowed file size to read is ${(maxBytes / 1024).toFixed(0)}KB to prevent token limit crashes. Use grep_search to find relevant sections instead of reading the whole file.`
-      };
-    }
-
-    const content = fs.readFileSync(fullPath, 'utf8');
-    return { success: true, output: content };
-  }
-
-  async writeFile(relPath: string, content: string): Promise<ToolResult> {
-    if (!relPath) return { success: false, output: 'Missing path parameter' };
-    const fullPath = await this.resolvePath(relPath);
-    const dir = path.dirname(fullPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    fs.writeFileSync(fullPath, content || '', 'utf8');
-    return { success: true, output: `Successfully wrote file to ${relPath}` };
-  }
-
-  async editFile(relPath: string, search: string, replace: string): Promise<ToolResult> {
-    if (!relPath) return { success: false, output: 'Missing path parameter' };
-    if (search === undefined || replace === undefined) {
-      return { success: false, output: 'Missing search or replace parameters' };
-    }
-    const fullPath = await this.resolvePath(relPath);
-    if (!fs.existsSync(fullPath)) {
-      return { success: false, output: `File not found: ${relPath}` };
-    }
-    const originalContent = fs.readFileSync(fullPath, 'utf8');
-
-    const normalize = (str: string) => str.replace(/\r\n/g, '\n');
-    const normalizedOriginal = normalize(originalContent);
-    const normalizedSearch = normalize(search);
-    const normalizedReplace = normalize(replace);
-
-    if (!normalizedOriginal.includes(normalizedSearch)) {
-      return {
-        success: false,
-        output: `Error: The search block was not found in '${relPath}'. Make sure your search block matches the file content exactly, including spaces and newlines.`
-      };
-    }
-
-    const occurrences = normalizedOriginal.split(normalizedSearch).length - 1;
-    if (occurrences > 1) {
-      return {
-        success: false,
-        output: `Error: The search block is not unique. Found ${occurrences} occurrences in '${relPath}'. Please include more surrounding lines of context to make it unique.`
-      };
-    }
-
-    const newContent = normalizedOriginal.replace(normalizedSearch, () => normalizedReplace);
-    fs.writeFileSync(fullPath, newContent, 'utf8');
-    return { success: true, output: `Successfully edited ${relPath}` };
   }
 
   async listDir(relPath: string = '.'): Promise<ToolResult> {
@@ -222,144 +202,83 @@ export class ToolExecutor {
     return { success: true, output };
   }
 
-  async grepSearch(query: string): Promise<ToolResult> {
-    if (!query) return { success: false, output: 'Missing query parameter' };
-    const activeRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || this.workspaceRoot;
-    const results: string[] = [];
-    const maxResults = 50;
-    const maxResultsPerFile = 10;
-    const maxLineLength = 250;
-    const maxOutputChars = 15000;
-    let totalOutputChars = 0;
-    let isTruncated = false;
-
-    const skipExts = [
-      '.min.js', '.min.css', '.map', '.png', '.jpg', '.jpeg', '.gif',
-      '.svg', '.ico', '.woff', '.woff2', '.ttf', '.eot', '.zip',
-      '.gz', '.tar', '.pdf', '.lock', '.log', '.bundle.js'
-    ];
-    const skipFiles = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml', 'composer.lock'];
-
-    const searchDir = (dir: string) => {
-      if (results.length >= maxResults || totalOutputChars >= maxOutputChars) return;
-      let files: string[];
-      try {
-        files = fs.readdirSync(dir);
-      } catch {
-        return; // Ignore unreadable directories
-      }
-
-      for (const file of files) {
-        if (results.length >= maxResults || totalOutputChars >= maxOutputChars) return;
-
-        // Skip exact heavy filenames or extension patterns
-        if (skipFiles.includes(file.toLowerCase())) continue;
-        if (skipExts.some(ext => file.toLowerCase().endsWith(ext))) continue;
-
-        const fullPath = path.join(dir, file);
-        const relPath = path.relative(activeRoot, fullPath);
-        const pathParts = relPath.split(path.sep);
-
-        // Skip binary, temporary, package, or massive dependency/cache directories
-        const skipDirs = [
-          'node_modules', '.git', 'out', 'dist', '.frappe-copilot', 
-          '.claude', 'assets', 'env', '.venv', 'venv', 
-          '__pycache__', '.vscode', 'develop-src', 'sites/assets',
-          '.github', '.egg-info', 'build', 'htmlcov'
-        ];
-
-        if (skipDirs.some(p => {
-          if (p.includes('/')) {
-            return relPath.replace(/\\/g, '/').includes(p);
-          }
-          return pathParts.includes(p);
-        })) {
-          continue;
-        }
-
-        try {
-          const stat = fs.lstatSync(fullPath);
-          if (stat.isSymbolicLink()) {
-            continue; // Skip symlinks to avoid duplicate matches and loops
-          }
-
-          if (stat.isDirectory()) {
-            searchDir(fullPath);
-          } else if (stat.isFile()) {
-            // Guardrail against huge files (> 1MB) being read line-by-line
-            if (stat.size > 1024 * 1024) continue;
-
-            const content = fs.readFileSync(fullPath, 'utf8');
-            if (content.includes('\0')) continue; // Skip binary files
-
-            const lines = content.split('\n');
-            let matchesInFile = 0;
-
-            for (let i = 0; i < lines.length; i++) {
-              if (lines[i].toLowerCase().includes(query.toLowerCase())) {
-                let trimmedLine = lines[i].trim();
-                if (trimmedLine.length > maxLineLength) {
-                  trimmedLine = trimmedLine.slice(0, maxLineLength) + '... [truncated line]';
-                }
-
-                const entry = `${relPath}:${i + 1}: ${trimmedLine}`;
-                if (totalOutputChars + entry.length > maxOutputChars) {
-                  // Saturate the counter so the guards in the enclosing
-                  // recursive calls also stop — otherwise this `return` only
-                  // unwinds one level and sibling directories keep appending
-                  // shorter matches after the output was declared truncated.
-                  totalOutputChars = maxOutputChars;
-                  isTruncated = true;
-                  return;
-                }
-
-                results.push(entry);
-                totalOutputChars += entry.length + 1;
-                matchesInFile++;
-
-                if (results.length >= maxResults) {
-                  isTruncated = true;
-                  return;
-                }
-                if (matchesInFile >= maxResultsPerFile) {
-                  break; // Stop after max matches per file to avoid one file dominating results
-                }
-              }
-            }
-          }
-        } catch {
-          // Ignore unreadable files or stats errors
-        }
-      }
-    };
-
-    searchDir(activeRoot);
-
-    if (results.length === 0) {
-      return {
-        success: true,
-        output: `No matches found for '${query}'`
-      };
-    }
-
-    let finalOutput = results.join('\n');
-    if (isTruncated) {
-      finalOutput += `\n\n... [Search output truncated: reached maximum match/character limit. Use a more specific query or narrow down the search directory if needed.]`;
-    }
-
-    return {
-      success: true,
-      output: finalOutput
-    };
-  }
-
   /** `onChunk`, when given, is called with each raw stdout/stderr chunk as it
    *  arrives — used to stream long-running bench commands (migrate, run-tests,
    *  build, ...) into the chat UI live instead of leaving it silent until the
    *  whole command finishes. The final ToolResult is unchanged either way. */
-  async executeCommand(commandStr: string, onChunk?: (chunk: string) => void): Promise<ToolResult> {
+  async executeCommand(
+    commandStr: string,
+    onChunk?: (chunk: string) => void,
+    timeoutMs: number = DEFAULT_COMMAND_TIMEOUT_MS,
+    /** Output kept per stream; the default keeps tool results readable, internal callers can ask for more. */
+    maxOutputChars: number = 15000
+  ): Promise<ToolResult> {
     if (!commandStr) return { success: false, output: 'Missing command parameter' };
+    const { cmdToRun, spawnOptions } = this.buildSpawn(commandStr);
 
+    return new Promise((resolve) => {
+      const child = spawn(cmdToRun, [], { ...spawnOptions, detached: process.platform !== 'win32' });
+      this.running.add(child);
+      let timedOut = false;
+      const timer = setTimeout(() => { timedOut = true; killTree(child); }, timeoutMs);
+
+      let stdout = '';
+      let stderr = '';
+
+      child.stdout?.on('data', (data: Buffer) => {
+        const chunk = data.toString();
+        stdout += chunk;
+        onChunk?.(chunk);
+      });
+      child.stderr?.on('data', (data: Buffer) => {
+        const chunk = data.toString();
+        stderr += chunk;
+        onChunk?.(chunk);
+      });
+
+      const finish = (exitCode: number | null, errMsg?: string) => {
+        clearTimeout(timer);
+        this.running.delete(child);
+        if (timedOut) {
+          errMsg = `Timed out after ${Math.round(timeoutMs / 1000)}s and was killed. Re-run with a larger timeout, or with run_in_background for long-running processes.`;
+        }
+        const limitOutput = (text: string, limit: number = maxOutputChars) => {
+          if (!text) return '';
+          if (text.length <= limit) return text;
+          return `... (truncated ${text.length - limit} characters) ...\n` + text.slice(-limit);
+        };
+
+        const cleanStdout = limitOutput(stdout);
+        const cleanStderr = limitOutput(stderr);
+
+        const output = [
+          cleanStdout ? `STDOUT:\n${cleanStdout}` : '',
+          cleanStderr ? `STDERR:\n${cleanStderr}` : ''
+        ].filter(Boolean).join('\n');
+
+        if (errMsg || exitCode !== 0) {
+          resolve({
+            success: false,
+            output: errMsg
+              ? `${timedOut ? errMsg : `Command failed to start: ${errMsg}`}\n\n${output}`
+              : `Command failed with exit code ${exitCode}\n\n${output}`
+          });
+        } else {
+          resolve({
+            success: true,
+            output: output || '(command executed successfully with no output)'
+          });
+        }
+      };
+
+      child.on('close', (exitCode: number | null) => finish(exitCode));
+      child.on('error', (err: Error) => finish(1, err.message));
+    });
+  }
+
+  /** Routes bench commands into the bench dir / Docker container and wraps
+   *  WSL paths — shared by foreground and background execution. */
+  private buildSpawn(commandStr: string): { cmdToRun: string; spawnOptions: any } {
     const activeRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || this.workspaceRoot;
     let fullCommand = commandStr;
     // Matches 'bench ...' as well as a piped-into form like
@@ -424,64 +343,27 @@ export class ToolExecutor {
       }
     }
 
-    return new Promise((resolve) => {
-      const child = spawn(cmdToRun, [], spawnOptions);
-
-      let stdout = '';
-      let stderr = '';
-
-      child.stdout?.on('data', (data: Buffer) => {
-        const chunk = data.toString();
-        stdout += chunk;
-        onChunk?.(chunk);
-      });
-      child.stderr?.on('data', (data: Buffer) => {
-        const chunk = data.toString();
-        stderr += chunk;
-        onChunk?.(chunk);
-      });
-
-      const finish = (exitCode: number | null, errMsg?: string) => {
-        const limitOutput = (text: string, limit: number = 15000) => {
-          if (!text) return '';
-          if (text.length <= limit) return text;
-          return `... (truncated ${text.length - limit} characters) ...\n` + text.slice(-limit);
-        };
-
-        const cleanStdout = limitOutput(stdout);
-        const cleanStderr = limitOutput(stderr);
-
-        const output = [
-          cleanStdout ? `STDOUT:\n${cleanStdout}` : '',
-          cleanStderr ? `STDERR:\n${cleanStderr}` : ''
-        ].filter(Boolean).join('\n');
-
-        if (errMsg || exitCode !== 0) {
-          resolve({
-            success: false,
-            output: errMsg
-              ? `Command failed to start: ${errMsg}\n\n${output}`
-              : `Command failed with exit code ${exitCode}\n\n${output}`
-          });
-        } else {
-          resolve({
-            success: true,
-            output: output || '(command executed successfully with no output)'
-          });
-        }
-      };
-
-      child.on('close', (exitCode: number | null) => finish(exitCode));
-      child.on('error', (err: Error) => finish(1, err.message));
-    });
+    return { cmdToRun, spawnOptions };
   }
 
   /** Falls back to config.json's defaultSite when the model didn't pass one
    *  explicitly. Shared by every tool that hits the live site's database. */
-  private resolveSite(site?: string): string | null {
-    if (site) return site;
-    const config = readConfig();
-    return config?.defaultSite || null;
+  private async resolveSite(site?: string): Promise<string | null> {
+    const res = await this.sites.resolve(site);
+    this.siteError = `Error: no site to run against. ${res.note}`;
+    return res.site;
+  }
+
+  /** Runs a shell snippet from the bench directory — inside the container
+   *  for Docker benches, whose files aren't visible on the host. */
+  private async runInBench(script: string): Promise<ToolResult> {
+    const env = this.benchEnv;
+    if (!env || env.type === 'not-found') return { success: false, output: 'No bench environment detected.' };
+    const quoted = `'${script.replace(/'/g, "'\\''")}'`;
+    const cmd = env.type === 'docker'
+      ? `docker exec -w ${env.benchDir} ${env.containerId} sh -c ${quoted}`
+      : `cd "${env.benchDir}" && sh -c ${quoted}`;
+    return this.executeCommand(cmd, undefined, 20_000);
   }
 
   /** Runs arbitrary Python code against the site.
@@ -509,7 +391,7 @@ export class ToolExecutor {
    * `code` is a semicolon-joined Python one-liner. We embed it verbatim inside
    * `exec(...)` so splitting on `;` is never needed and the code is always
    * valid regardless of what characters appear inside string literals. */
-  private async runPythonOneLiner(site: string, code: string): Promise<ToolResult> {
+  private async runPythonOneLiner(site: string, code: string, maxOutputChars?: number): Promise<ToolResult> {
     const stem = `_fc_tmp_${Date.now()}`;
     const tmpName = `${stem}.py`;
     const execMethod = `frappe.${stem}.execute`;
@@ -536,7 +418,7 @@ export class ToolExecutor {
       }
 
       const execCmd = `bench --site ${site} execute ${execMethod}`;
-      const result = await this.executeCommand(execCmd);
+      const result = await this.executeCommand(execCmd, undefined, undefined, maxOutputChars);
 
       // Clean up regardless of success
       await this.executeCommand(`docker exec ${containerId} rm -f ${remotePath}`);
@@ -554,7 +436,7 @@ export class ToolExecutor {
       }
 
       const execCmd = `bench --site ${site} execute ${execMethod}`;
-      const result = await this.executeCommand(execCmd);
+      const result = await this.executeCommand(execCmd, undefined, undefined, maxOutputChars);
 
       // Clean up
       try { fs.unlinkSync(localPath); } catch { /* ignore cleanup errors */ }
@@ -572,11 +454,11 @@ export class ToolExecutor {
 
   async introspectDocType(doctype: string, site?: string): Promise<ToolResult> {
     if (!doctype) return { success: false, output: 'Missing doctype parameter' };
-    const activeSite = this.resolveSite(site);
+    const activeSite = await this.resolveSite(site);
     if (!activeSite) {
       return {
         success: false,
-        output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.'
+        output: this.siteError
       };
     }
 
@@ -589,9 +471,30 @@ export class ToolExecutor {
     // prompt. Route the value through base64, like every write_* tool below
     // already does, so no character in it is ever shell/Python-meaningful.
     const b64 = this.b64Json(doctype);
-    const pythonCode = `import frappe, json, base64; dt = json.loads(base64.b64decode('${b64}').decode('utf-8')); m = frappe.get_meta(dt); print(json.dumps({'name': m.name, 'module': m.module, 'issingle': m.issingle, 'istable': m.istable, 'is_submittable': m.is_submittable, 'title_field': m.title_field, 'fields': [{'fieldname': f.fieldname, 'fieldtype': f.fieldtype, 'label': f.label, 'options': f.options, 'reqd': f.reqd, 'in_list_view': f.in_list_view} for f in m.fields], 'links': [{'link_doctype': l.link_doctype, 'link_fieldname': l.link_fieldname, 'group': l.group} for l in getattr(m, 'links', [])], 'states': [{'title': s.title, 'color': s.color} for s in getattr(m, 'states', [])]}, indent=2))`;
+    // Compact on purpose: pretty-printed meta for a big DocType (User, Sales
+    // Invoice) blew past the 15K output cap, and the cap keeps the tail — so
+    // the header (name, module, flags) was the part that got cut. Falsy keys
+    // are dropped and fields are one line each.
+    const pythonCode = `import frappe, json, base64; dt = json.loads(base64.b64decode('${b64}').decode('utf-8')); m = frappe.get_meta(dt); c = lambda d: {k: v for k, v in d.items() if v}; print(json.dumps(c({'name': m.name, 'module': m.module, 'issingle': m.issingle, 'istable': m.istable, 'is_submittable': m.is_submittable, 'title_field': m.title_field, 'autoname': m.autoname}))); print('fields (fieldname | fieldtype | label | options | flags):'); [print(' | '.join([f.fieldname or '', f.fieldtype or '', f.label or '', (f.options or '').replace(chr(10), ', ')] + [x for x in ('reqd' if f.reqd else '', 'list' if f.in_list_view else '', 'read_only' if f.read_only else '', 'hidden' if f.hidden else '') if x])) for f in m.fields]; print('links: ' + json.dumps([c({'link_doctype': l.link_doctype, 'link_fieldname': l.link_fieldname, 'group': l.group}) for l in getattr(m, 'links', [])]))`;
 
     return await this.runPythonOneLiner(activeSite, pythonCode);
+  }
+
+  /** Installed apps and every DocType name on the resolved site, or null. */
+  async fetchSchema(): Promise<{ site: string; doctypes: string[]; apps: string[] } | null> {
+    const site = await this.resolveSite();
+    if (!site) return null;
+    const code = "import frappe, json; print('__FC_SCHEMA__' + json.dumps({'doctypes': frappe.get_all('DocType', pluck='name'), 'apps': frappe.get_installed_apps()}))";
+    // ~1,000 DocType names on one line — far past the cap tool results use.
+    const res = await this.runPythonOneLiner(site, code, 2_000_000);
+    const line = res.output.split('\n').find(l => l.includes('__FC_SCHEMA__'));
+    if (!line) return null;
+    try {
+      const parsed = JSON.parse(line.slice(line.indexOf('__FC_SCHEMA__') + '__FC_SCHEMA__'.length));
+      return Array.isArray(parsed.doctypes) && Array.isArray(parsed.apps) ? { site, ...parsed } : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Lists everything already customizing a DocType outside its own app code —
@@ -601,9 +504,9 @@ export class ToolExecutor {
    *  silently duplicate or conflict with one that already exists. */
   async listCustomizations(doctype: string, site?: string): Promise<ToolResult> {
     if (!doctype) return { success: false, output: 'Missing doctype parameter' };
-    const activeSite = this.resolveSite(site);
+    const activeSite = await this.resolveSite(site);
     if (!activeSite) {
-      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+      return { success: false, output: this.siteError };
     }
 
     const b64 = this.b64Json(doctype);
@@ -630,9 +533,9 @@ export class ToolExecutor {
     if (!doctype || !fieldname || !fieldtype) {
       return { success: false, output: 'Missing required parameter(s): doctype, fieldname, fieldtype' };
     }
-    const activeSite = this.resolveSite(args.site);
+    const activeSite = await this.resolveSite(args.site);
     if (!activeSite) {
-      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+      return { success: false, output: this.siteError };
     }
 
     const df: Record<string, unknown> = { fieldname, fieldtype };
@@ -669,9 +572,9 @@ export class ToolExecutor {
     if (!doctype || !property || value === undefined) {
       return { success: false, output: 'Missing required parameter(s): doctype, property, value' };
     }
-    const activeSite = this.resolveSite(args.site);
+    const activeSite = await this.resolveSite(args.site);
     if (!activeSite) {
-      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+      return { success: false, output: this.siteError };
     }
 
     const payload = {
@@ -703,9 +606,9 @@ export class ToolExecutor {
     if (!doctype || !module) {
       return { success: false, output: 'Missing required parameter(s): doctype, module' };
     }
-    const activeSite = this.resolveSite(args.site);
+    const activeSite = await this.resolveSite(args.site);
     if (!activeSite) {
-      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+      return { success: false, output: this.siteError };
     }
 
     const payload = {
@@ -729,9 +632,9 @@ export class ToolExecutor {
     if (!doctype || !script) {
       return { success: false, output: 'Missing required parameter(s): doctype, script' };
     }
-    const activeSite = this.resolveSite(args.site);
+    const activeSite = await this.resolveSite(args.site);
     if (!activeSite) {
-      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+      return { success: false, output: this.siteError };
     }
 
     const payload = {
@@ -758,9 +661,9 @@ export class ToolExecutor {
     if (!name || !script) {
       return { success: false, output: 'Missing required parameter(s): name, script' };
     }
-    const activeSite = this.resolveSite(args.site);
+    const activeSite = await this.resolveSite(args.site);
     if (!activeSite) {
-      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+      return { success: false, output: this.siteError };
     }
 
     const payload: Record<string, unknown> = {
@@ -826,9 +729,9 @@ export class ToolExecutor {
     if (!page_name || !blocks) {
       return { success: false, output: 'Missing required parameter(s): page_name, blocks' };
     }
-    const activeSite = this.resolveSite(args.site);
+    const activeSite = await this.resolveSite(args.site);
     if (!activeSite) {
-      return { success: false, output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.' };
+      return { success: false, output: this.siteError };
     }
 
     let parsed: unknown;
@@ -918,7 +821,7 @@ export class ToolExecutor {
     // bench-prefixed commands get that routing in executeCommand). Skipped
     // silently if no default site is configured yet (e.g. a brand new bench
     // with no site created) — this is a sanity check, not a hard requirement.
-    const site = this.resolveSite(args.site);
+    const site = await this.resolveSite(args.site);
     if (site) {
       const b64 = this.b64Json({ appName });
       const code = `import frappe, json, base64, os; payload = json.loads(base64.b64decode('${b64}').decode('utf-8')); path = os.path.join('apps', payload['appName'], payload['appName'], 'hooks.py'); print(json.dumps({'exists': os.path.exists(path)}))`;
@@ -956,11 +859,11 @@ export class ToolExecutor {
     const safeApp = this.sanitizeAppName(app);
     const safeModule = args.module ? this.sanitizeMetaField(args.module, '') : '';
 
-    const site = this.resolveSite(args.site);
+    const site = await this.resolveSite(args.site);
     if (!site) {
       return {
         success: false,
-        output: 'Error: No site provided and no default site configured in config.json. Please configure a default site first.'
+        output: this.siteError
       };
     }
 

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { Message, ChatOptions, ChatResponse } from '../types';
 import { LLMProvider } from './interface';
-import { toOpenAIMessage } from './openaiMessage';
+import { toOpenAIMessages, toOpenAITools, OpenAIToolAccumulator, samplingParams } from './openaiMessage';
 
 const API_KEY_SECRET = 'frappe-copilot.openaiApiKey';
 
@@ -65,8 +65,8 @@ export class OpenAIProvider implements LLMProvider {
     const headers = await this.buildHeaders();
     const body = {
       model: options?.model || this.model,
-      messages: messages.map(toOpenAIMessage),
-      temperature: options?.temperature ?? this.temperature,
+      messages: toOpenAIMessages(messages),
+      ...samplingParams(options?.model || this.model, options?.temperature ?? this.temperature, options?.effort),
       stream: false,
     };
 
@@ -99,9 +99,11 @@ export class OpenAIProvider implements LLMProvider {
     const headers = await this.buildHeaders();
     const body = {
       model: options?.model || this.model,
-      messages: messages.map(toOpenAIMessage),
-      temperature: options?.temperature ?? this.temperature,
+      messages: toOpenAIMessages(messages),
+      ...samplingParams(options?.model || this.model, options?.temperature ?? this.temperature, options?.effort),
       stream: true,
+      stream_options: { include_usage: true },
+      ...(options?.tools?.length ? { tools: toOpenAITools(options.tools), tool_choice: 'auto' } : {}),
     };
 
     const MAX_RETRIES = 3;
@@ -148,8 +150,13 @@ export class OpenAIProvider implements LLMProvider {
 
       const decoder = new TextDecoder();
       let buffer = '';
+      const toolAcc = new OpenAIToolAccumulator();
+      let reasoningText = '';
+      let lengthCut = false;
+      let usage: ChatResponse['usage'];
 
       try {
+        readLoop:
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -163,7 +170,7 @@ export class OpenAIProvider implements LLMProvider {
             if (!trimmed || !trimmed.startsWith('data: ')) continue;
 
             const dataStr = trimmed.slice(6).trim();
-            if (dataStr === '[DONE]') return;
+            if (dataStr === '[DONE]') break readLoop;
 
             try {
               const chunk = JSON.parse(dataStr);
@@ -177,6 +184,12 @@ export class OpenAIProvider implements LLMProvider {
               // it) looks like a complete answer and the agent loop silently
               // ends the run with a chopped-off reply.
               const truncated = choice?.finish_reason === 'length';
+              toolAcc.add(deltaObj?.tool_calls);
+              if (chunk.usage) {
+                usage = { promptTokens: chunk.usage.prompt_tokens, completionTokens: chunk.usage.completion_tokens, totalTokens: chunk.usage.total_tokens };
+              }
+              reasoningText += reasoning;
+              if (truncated) lengthCut = true;
               if (delta || reasoning || truncated) {
                 yield {
                   content: delta,
@@ -193,10 +206,29 @@ export class OpenAIProvider implements LLMProvider {
       } finally {
         reader.releaseLock();
       }
+      const toolCalls = toolAcc.finish();
+      if (toolCalls.length || usage || (toolAcc.incompleteToolCall && !lengthCut)) {
+        yield {
+          content: '',
+          model: this.model,
+          usage,
+          truncated: toolAcc.incompleteToolCall,
+          toolCalls: toolCalls.length ? toolCalls : undefined,
+          thinkingBlocks: toolCalls.length && reasoningText ? [{ thinking: reasoningText }] : undefined,
+        };
+      }
       return;
     }
 
     throw lastError || new Error('OpenAI API request failed after retries.');
+  }
+
+  supportsNativeTools(): boolean {
+    return true;
+  }
+
+  getModelId(): string {
+    return this.model;
   }
 
   async isAvailable(): Promise<boolean> {
@@ -210,23 +242,27 @@ export class OpenAIProvider implements LLMProvider {
       const response = await fetch(url, {
         method: 'GET',
         headers,
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(8000),
       });
 
       if (response.ok) {
         const data = await response.json() as any;
         if (data && Array.isArray(data.data)) {
+          // Chat-capable families only, newest first.
+          const chat = /^(gpt-|o\d|chatgpt-)/;
+          const notChat = /(embedding|tts|whisper|dall-e|audio|realtime|transcribe|image|moderation|search|instruct)/;
           const models = data.data
-            .map((m: any) => m.id)
-            .filter((id: string) => id.startsWith('gpt-') || id.startsWith('o1-') || id.startsWith('o3-'));
+            .filter((m: any) => chat.test(m.id) && !notChat.test(m.id))
+            .sort((a: any, b: any) => (b.created || 0) - (a.created || 0))
+            .map((m: any) => m.id);
           if (models.length > 0) {
-            return models.sort();
+            return models;
           }
         }
       }
     } catch (e) {
       console.warn('Failed to fetch OpenAI models dynamically:', e);
     }
-    return ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'];
+    return ['gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4o', 'gpt-4o-mini'];
   }
 }

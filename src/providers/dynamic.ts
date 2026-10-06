@@ -59,6 +59,18 @@ export class DynamicProvider implements LLMProvider {
     return this.activeProvider.isAvailable();
   }
 
+  getModelId(): string {
+    return this.activeProvider.getModelId?.() ?? '';
+  }
+
+  managesContextServerSide(): boolean {
+    return this.activeProvider.managesContextServerSide?.() ?? false;
+  }
+
+  supportsNativeTools(): boolean {
+    return this.activeProvider.supportsNativeTools?.() ?? false;
+  }
+
   getEmbeddings(text: string): Promise<number[]> {
     if (!this.activeProvider.getEmbeddings) {
       return Promise.reject(new Error(`${this.activeProvider.name} does not support embeddings.`));

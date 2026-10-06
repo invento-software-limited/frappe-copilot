@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; connect-src https:;">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2389b4fa' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='2' y='2' width='20' height='20' rx='3' stroke='%2389b4fa' fill='none'/><path d='M6 8h4l2-3 2 3h4' stroke='%2389b4fa' fill='none'/><path d='M6 16h12' stroke='%2389b4fa' fill='none'/><path d='M8 8v8' stroke='%2389b4fa' fill='none'/><path d='M16 8v8' stroke='%2389b4fa' fill='none'/><circle cx='6' cy='8' r='1.5' fill='%2389b4fa'/><circle cx='18' cy='8' r='1.5' fill='%2389b4fa'/><circle cx='6' cy='16' r='1.5' fill='%2389b4fa'/><circle cx='18' cy='16' r='1.5' fill='%2389b4fa'/><path d='M12 2l.5 1.5L14 4l-1.5.5L12 6l-.5-1.5L10 4l1.5-.5z' fill='%23f9e2af' stroke='none'/></svg>">
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
@@ -277,58 +278,6 @@ body{font-family:var(--vscode-font-family,-apple-system,sans-serif);font-size:va
   font-weight: 600;
   border-bottom: 1px solid var(--vscode-widget-border,#404040);
   padding-bottom: 6px;
-}
-.todo-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 12px;
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.12);
-  border: 1px solid var(--vscode-widget-border, #404040);
-  transition: all 0.2s ease;
-}
-.todo-item.running {
-  border-color: var(--vscode-textLink-foreground, #4fc1ff);
-  background: rgba(79, 193, 255, 0.05);
-}
-.todo-item.running .todo-icon {
-  color: var(--vscode-textLink-foreground, #4fc1ff);
-  animation: pulse 1.5s infinite;
-}
-.todo-item.completed {
-  border-color: var(--vscode-testing-iconPassed, #4ec9b0);
-  background: rgba(78, 201, 176, 0.03);
-}
-.todo-item.completed .todo-icon {
-  color: var(--vscode-testing-iconPassed, #4ec9b0);
-  font-weight: bold;
-}
-.todo-item.completed .todo-label {
-  text-decoration: line-through;
-  color: var(--vscode-descriptionForeground, #888);
-}
-.todo-item.failed {
-  border-color: var(--vscode-testing-iconFailed, #f14c4c);
-  background: rgba(241, 76, 76, 0.05);
-}
-.todo-item.failed .todo-icon {
-  color: var(--vscode-testing-iconFailed, #f14c4c);
-  font-weight: bold;
-}
-.todo-icon {
-  font-size: 13px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 14px;
-  height: 14px;
-  font-family: inherit;
-}
-.todo-label {
-  flex: 1;
-  color: var(--vscode-editor-foreground, #d4d4d4);
 }
 .graph-nodes {
   position: relative;
@@ -761,6 +710,220 @@ tr:nth-child(even) {
   background: #4a4a4a !important;
   color: #ffffff !important;
 }
+
+/* ==== Claude-style layer: flat assistant text, user bubbles, compact tool
+   rows, rounded composer. Loaded last, so it wins over the rules above. ==== */
+:root{
+  --cl-accent:#89b4fa;
+  --cl-accent-strong:#89b4fa;
+  --cl-on-accent:#11111b;
+  --cl-spark:#f9e2af;
+  --cl-text:var(--vscode-editor-foreground,#e8e6dc);
+  --cl-muted:var(--vscode-descriptionForeground,#9b998f);
+  --cl-surface:var(--vscode-input-background,#30302e);
+  --cl-raised:color-mix(in srgb, var(--cl-text) 7%, transparent);
+  --cl-hover:color-mix(in srgb, var(--cl-text) 5%, transparent);
+  --cl-border:color-mix(in srgb, var(--cl-text) 14%, transparent);
+  --cl-ok:#5fb87f;
+  --cl-err:var(--vscode-errorForeground,#e5786d);
+}
+body{font-size:13px;}
+
+/* Header */
+.hdr{background:transparent;border-bottom:1px solid var(--cl-border);padding:8px 12px;gap:6px;}
+.hdr .ttl{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;letter-spacing:-0.01em;}
+.brand-mark{width:16px;height:16px;flex-shrink:0;}
+.hdr .badge{font-size:10px;border-radius:999px;padding:2px 8px;}
+#st.b-on{background:transparent;border-color:transparent;color:var(--cl-muted);padding-left:12px;position:relative;}
+#st.b-on::before{content:'';position:absolute;left:3px;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--cl-ok);}
+#token-badge{font-variant-numeric:tabular-nums;background:transparent;border:1px solid var(--cl-border);color:var(--cl-muted);}
+#token-badge.b-pending{color:#cca700;border-color:rgba(204,167,0,0.35);}
+#token-badge.b-warn{color:var(--cl-err);border-color:color-mix(in srgb, var(--cl-err) 45%, transparent);}
+.hdr-btn{color:var(--cl-muted);border-radius:6px;padding:5px;margin-left:0;}
+.hdr-btn:hover{color:var(--cl-text);background:var(--cl-hover);}
+
+/* Messages */
+#chat{padding:14px 0 8px;}
+.msg{padding:6px 18px;gap:0;}
+.msg:hover{background:transparent;}
+.msg .ln,.msg .dot{display:none;}
+.bub{background:transparent;border:none;padding:0;border-radius:0;line-height:1.6;}
+.bub p{margin:0 0 8px;}
+.bub ul,.bub ol{margin:4px 0 8px;padding-left:20px;}
+.bub h1,.bub h2,.bub h3,.bub h4{font-size:14px;margin:12px 0 4px;}
+.bub pre{border:1px solid var(--cl-border);border-radius:10px;padding:10px 12px;}
+.msg.user-msg{justify-content:flex-end;padding-top:10px;padding-bottom:10px;}
+.msg.user-msg .bub{flex:0 1 auto;max-width:85%;background:var(--cl-raised);border-radius:16px;padding:8px 14px;}
+.msg.system-msg .bub{color:var(--cl-muted);font-size:12px;padding:0;}
+.msg.error-msg .bub{background:color-mix(in srgb, var(--cl-err) 10%, transparent);border:1px solid color-mix(in srgb, var(--cl-err) 25%, transparent);border-radius:10px;padding:8px 12px;}
+
+/* Thought block */
+.thought-shell{margin:0 0 8px;}
+.thought-hdr{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;color:var(--cl-muted);font-size:12px;padding:2px 0;}
+.thought-hdr:hover{color:var(--cl-text);}
+.thought-hdr .chev{transition:transform 0.15s ease;}
+.thought-shell.open .thought-hdr .chev{transform:rotate(90deg);}
+.thought-shell .thought-body{display:none;margin-top:6px;padding:2px 0 2px 12px;border-left:2px solid var(--cl-border);color:var(--cl-muted);font-size:12px;line-height:1.55;}
+.thought-shell.open .thought-body{display:block;}
+
+/* Status line (live run timer) */
+.msg.thinking{padding:8px 18px;}
+.msg.thinking .bub{display:block;}
+.status-line{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--cl-muted);min-width:0;}
+.status-line .spark{width:14px;height:14px;color:var(--cl-spark);flex-shrink:0;animation:sparkSpin 2.4s linear infinite;}
+.status-line .think-label{font-style:normal;color:var(--cl-accent);font-weight:500;font-size:12px;}
+.status-line .think-timer{font-variant-numeric:tabular-nums;min-width:0;}
+.status-line .think-phase{flex:1;min-width:0;max-width:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.status-line .think-hint{flex-shrink:0;opacity:0.7;font-size:11px;}
+.status-line .think-retry{flex-shrink:0;}
+@keyframes sparkSpin{0%{transform:rotate(0) scale(1);}50%{transform:rotate(90deg) scale(0.7);}100%{transform:rotate(180deg) scale(1);}}
+.run-done{display:flex;align-items:center;gap:6px;padding:2px 18px 10px;color:var(--cl-muted);font-size:11px;font-variant-numeric:tabular-nums;}
+.run-done .brand-mark{width:11px;height:11px;}
+
+/* Tool rows */
+.tool-card{border:none;background:transparent;box-shadow:none;border-radius:0;margin:0 18px;padding:1px 0;gap:4px;font-size:12px;}
+.tool-hdr{gap:8px;padding:4px 8px;margin:0 -8px;border-radius:8px;cursor:pointer;min-width:0;}
+.tool-hdr:hover{background:var(--cl-hover);}
+.tool-icon{display:none;}
+.tool-status{order:-1;flex-shrink:0;width:7px;height:7px;padding:0;border:none !important;border-radius:50%;font-size:0;}
+.ts-pending{background:var(--cl-muted);opacity:0.6;}
+.ts-running{background:var(--cl-accent);animation:pulse 1.2s infinite ease-in-out;}
+.ts-success{background:var(--cl-ok);}
+.ts-failed{background:var(--cl-err);}
+.ts-rejected{background:var(--cl-muted);}
+.tool-title{flex:0 0 auto;font-weight:600;color:var(--cl-text);}
+.tool-summary{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cl-muted);font-family:var(--vscode-editor-font-family,monospace);font-size:11.5px;}
+.tool-time{flex-shrink:0;color:var(--cl-muted);font-size:11px;font-variant-numeric:tabular-nums;}
+.tool-chev{flex-shrink:0;color:var(--cl-muted);transition:transform 0.15s ease;}
+.tool-card.open .tool-chev{transform:rotate(90deg);}
+.tool-card .tool-args,.tool-card #t-custom,.tool-card .tool-out-container{display:none !important;}
+.tool-card.open .tool-args,.tool-card.open #t-custom:not(:empty),.tool-card.open .tool-out-container[data-has-output]{display:block !important;}
+.tool-args{margin:0 0 0 15px;background:transparent;border-left:2px solid var(--cl-border);border-radius:0;padding:4px 10px;color:var(--cl-muted);max-height:160px;}
+.tool-card #t-custom{margin-left:15px;}
+.tool-out-container{margin-left:15px;}
+.tool-out-toggle{display:none;}
+.tool-card.open .tool-out{display:block;max-height:260px;overflow:auto;border:1px solid var(--cl-border);border-radius:8px;margin:2px 0 4px;}
+.tool-card.needs-approval{border:1px solid var(--cl-border);background:var(--cl-raised);border-radius:12px;padding:8px 12px;margin:6px 18px;}
+.tool-card.needs-approval .tool-hdr{margin:0;}
+.tool-approval{border-top:none;padding:4px 0 2px 15px;flex-direction:row;align-items:center;justify-content:space-between;flex-wrap:wrap;}
+.tool-approval-msg{font-style:normal;color:var(--cl-muted);font-size:12px;}
+.tool-btn{border-radius:8px;padding:5px 14px;font-size:12px;}
+.tool-btn-approve{background:var(--cl-accent-strong);color:var(--cl-on-accent);}
+.tool-btn-approve:hover{background:var(--cl-accent);}
+.tool-btn-reject{background:transparent;color:var(--cl-text);border:1px solid var(--cl-border);}
+.tool-btn-reject:hover{background:var(--cl-hover);}
+
+/* Welcome */
+.welcome-container{margin:auto;padding:24px 20px;max-width:520px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px;}
+#chat:has(> .msg, > .tool-card) .welcome-container{display:none;}
+.welcome-mark .brand-mark{width:30px;height:30px;}
+.welcome-title{font-size:22px;font-weight:500;letter-spacing:-0.02em;line-height:1.25;margin:4px 0 0;}
+.welcome-subtitle{font-size:13px;color:var(--cl-muted);line-height:1.55;max-width:400px;margin:0;}
+.welcome-chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:10px;}
+.chip{background:transparent;border:1px solid var(--cl-border);color:var(--cl-text);border-radius:999px;padding:6px 12px;font:inherit;font-size:12px;cursor:pointer;}
+.chip:hover{background:var(--cl-hover);border-color:color-mix(in srgb, var(--cl-text) 24%, transparent);}
+
+/* Composer */
+#bot{display:block;border-top:none;background:transparent;padding:6px 12px 12px;}
+.composer{display:flex;flex-direction:column;gap:6px;background:var(--cl-surface);border:1px solid var(--cl-border);border-radius:var(--cl-radius,14px);padding:10px 10px 8px 12px;transition:border-color 0.15s ease,box-shadow 0.15s ease;}
+.composer:focus-within{border-color:color-mix(in srgb, var(--cl-accent) 55%, transparent);box-shadow:0 0 0 3px color-mix(in srgb, var(--cl-accent) 12%, transparent);}
+#inp{background:transparent;border:none;border-radius:0;padding:2px 2px;min-height:22px;max-height:200px;line-height:1.5;}
+#inp:focus{border:none;box-shadow:none;}
+.composer-bar{display:flex;align-items:center;gap:4px;}
+.icon-btn,#upb{width:28px;height:28px;border-radius:8px;color:var(--cl-muted);background:transparent;}
+#upb:hover{background:var(--cl-hover);color:var(--cl-text);}
+.pill-select,.pill{appearance:none;-webkit-appearance:none;background:transparent;border:1px solid transparent;color:var(--cl-muted);font:inherit;font-size:12px;border-radius:8px;padding:4px 8px;cursor:pointer;outline:none;display:inline-flex;align-items:center;gap:5px;max-width:200px;}
+.pill-select:hover,.pill:hover{background:var(--cl-hover);color:var(--cl-text);}
+.pill-select option{background:var(--vscode-dropdown-background,#252526);color:var(--vscode-dropdown-foreground,#ccc);}
+#model-btn-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#snd{width:30px;height:30px;border-radius:9px;background:var(--cl-accent-strong);color:var(--cl-on-accent);margin-left:2px;}
+#snd:hover:not(:disabled){background:var(--cl-accent);}
+#snd:disabled{opacity:0.35;}
+#snd.stop{background:var(--cl-raised);color:var(--cl-text);}
+.slash-menu{border-radius:12px;}
+
+/* Skill chips */
+.skill-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:4px 18px;}
+.skill-row-label{font-size:11px;color:var(--cl-muted);margin-right:2px;}
+.skill-chip{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid var(--cl-border);color:var(--cl-text);font-family:var(--vscode-editor-font-family,monospace);cursor:default;}
+.skill-chip.ref{color:var(--cl-muted);border-style:dashed;}
+
+/* Effort picker */
+.effort-picker{position:relative;}
+.effort-pop{display:none;position:absolute;right:0;bottom:calc(100% + 8px);width:260px;max-width:calc(100vw - 32px);background:var(--vscode-dropdown-background,#2b2b29);border:1px solid var(--cl-border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.35);z-index:60;padding:12px 14px 10px;flex-direction:column;gap:8px;}
+.effort-pop.open{display:flex;}
+.effort-head{display:flex;align-items:center;gap:8px;font-size:13px;}
+.effort-title{color:var(--cl-muted);}
+.effort-value{color:var(--cl-text);font-weight:600;flex:1;}
+.effort-help{width:16px;height:16px;border-radius:50%;border:1px solid var(--cl-border);color:var(--cl-muted);font-size:10px;display:inline-flex;align-items:center;justify-content:center;cursor:help;}
+.effort-scale{display:flex;justify-content:space-between;font-size:11px;color:var(--cl-muted);}
+.effort-track{position:relative;height:26px;border-radius:8px;background:var(--cl-raised);display:flex;align-items:center;justify-content:space-between;padding:0 10px;cursor:pointer;outline:none;}
+.effort-track:focus-visible{box-shadow:0 0 0 2px color-mix(in srgb, var(--cl-accent) 50%, transparent);}
+.effort-stop{position:relative;width:14px;height:26px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.effort-stop::before{content:'';width:4px;height:4px;border-radius:50%;background:var(--cl-muted);opacity:0.6;}
+.effort-stop.active::before{width:14px;height:18px;border-radius:5px;background:var(--cl-text);opacity:1;}
+.effort-recs{position:relative;height:14px;padding:0 10px;display:flex;justify-content:space-between;}
+.effort-recs span{width:14px;display:flex;justify-content:center;font-size:10px;color:var(--cl-accent);white-space:nowrap;}
+.effort-reset{align-self:flex-start;background:transparent;border:none;color:var(--cl-muted);font:inherit;font-size:11px;padding:2px 0;cursor:pointer;}
+.effort-reset:hover{color:var(--cl-text);text-decoration:underline;}
+#effort-btn.custom{color:var(--cl-text);}
+
+/* Task list dock */
+.todo-dock{display:none;flex-direction:column;margin:0 0 8px;border:1px solid var(--cl-border);border-radius:12px;background:var(--cl-surface);overflow:hidden;}
+.todo-dock.show{display:flex;}
+.todo-head{display:flex;align-items:center;gap:8px;padding:7px 10px;background:transparent;border:none;color:var(--cl-text);font:inherit;font-size:12px;cursor:pointer;text-align:left;min-width:0;}
+.todo-head:hover{background:var(--cl-hover);}
+.todo-progress{display:flex;flex-shrink:0;}
+.todo-current{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;}
+.todo-count{flex-shrink:0;color:var(--cl-muted);font-variant-numeric:tabular-nums;font-size:11px;}
+.todo-chev{flex-shrink:0;color:var(--cl-muted);transition:transform 0.15s ease;}
+.todo-dock.collapsed .todo-chev{transform:rotate(180deg);}
+.todo-items{list-style:none;margin:0;padding:2px 10px 8px;display:flex;flex-direction:column;gap:2px;max-height:180px;overflow-y:auto;}
+.todo-dock.collapsed .todo-items,.todo-dock.collapsed .todo-stale{display:none !important;}
+.todo-item{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.45;padding:2px 0;color:var(--cl-text);}
+.todo-mark{width:18px;height:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
+.todo-item.completed .todo-mark{color:var(--cl-ok);}
+.todo-item.completed .todo-text{color:var(--cl-muted);text-decoration:line-through;text-decoration-color:color-mix(in srgb, var(--cl-muted) 60%, transparent);}
+.todo-item.cancelled .todo-mark,.todo-item.cancelled .todo-text{color:var(--cl-muted);}
+.todo-item.cancelled .todo-text{text-decoration:line-through;}
+.todo-item.in_progress .todo-text{font-weight:600;}
+.todo-circle{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--cl-muted);}
+.todo-dot{width:10px;height:10px;border-radius:50%;background:var(--cl-accent);animation:pulse 1.4s infinite ease-in-out;}
+.todo-stale{display:none;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--cl-border);font-size:11px;color:var(--cl-muted);}
+.todo-stale.show{display:flex;}
+.todo-stale span{flex:1;}
+.todo-clear{background:transparent;border:1px solid var(--cl-border);color:var(--cl-text);border-radius:6px;font:inherit;font-size:11px;padding:2px 8px;cursor:pointer;}
+.todo-clear:hover{background:var(--cl-hover);}
+
+/* Queued messages */
+#queue{display:none;flex-direction:column;gap:4px;padding:0 14px 6px;}
+#queue.show{display:flex;}
+.queued{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--cl-muted);padding:4px 10px;border:1px dashed var(--cl-border);border-radius:10px;min-width:0;}
+.queued .q-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.queued .q-rm{background:transparent;border:none;color:var(--cl-muted);cursor:pointer;font-size:12px;padding:0 2px;}
+.queued .q-rm:hover{color:var(--cl-text);}
+.tool-btn-always{background:transparent;color:var(--cl-text);border:1px solid var(--cl-border);}
+.tool-btn-always:hover{background:var(--cl-hover);}
+
+/* Model picker */
+.model-picker{position:relative;}
+.model-pop{display:none;position:absolute;right:0;bottom:calc(100% + 8px);width:280px;max-width:calc(100vw - 32px);background:var(--vscode-dropdown-background,#2b2b29);border:1px solid var(--cl-border);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.35);z-index:60;overflow:hidden;flex-direction:column;}
+.model-pop.open{display:flex;}
+.model-search{margin:8px;padding:6px 10px;border-radius:8px;border:1px solid var(--cl-border);background:transparent;color:var(--cl-text);font:inherit;font-size:12px;outline:none;}
+.model-search:focus{border-color:color-mix(in srgb, var(--cl-accent) 55%, transparent);}
+.model-list{max-height:260px;overflow-y:auto;padding:0 4px 4px;}
+.model-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;}
+.model-item:hover,.model-item.kb{background:var(--cl-hover);}
+.model-item .mi-text{flex:1;min-width:0;display:flex;flex-direction:column;}
+.model-item .mi-name{font-size:12.5px;color:var(--cl-text);}
+.model-item .mi-id{font-size:11px;color:var(--cl-muted);font-family:var(--vscode-editor-font-family,monospace);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.model-item .mi-check{width:14px;flex-shrink:0;color:var(--cl-accent);}
+.model-item .mi-new{font-size:10px;color:var(--cl-accent);border:1px solid color-mix(in srgb, var(--cl-accent) 40%, transparent);border-radius:999px;padding:0 6px;flex-shrink:0;}
+.model-empty{padding:10px;color:var(--cl-muted);font-size:12px;}
+.model-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px 6px 12px;border-top:1px solid var(--cl-border);font-size:11px;color:var(--cl-muted);}
+.model-refresh{display:inline-flex;align-items:center;gap:5px;background:transparent;border:none;color:var(--cl-text);font:inherit;font-size:11px;padding:4px 8px;border-radius:6px;cursor:pointer;}
+.model-refresh:hover{background:var(--cl-hover);}
+.model-refresh.loading svg{animation:sparkSpin 1s linear infinite;}
 </style>
 </head>
 <body>
@@ -791,15 +954,10 @@ window.onerror = function(message, source, lineno, colno, error) {
 };
 </script>
 <div class="hdr">
-  <span class="ttl">✦ Frappe Copilot</span>
+  <span class="ttl"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="#89b4fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M6 8h4l2-3 2 3h4"/><path d="M6 16h12"/><path d="M8 8v8"/><path d="M16 8v8"/><circle cx="6" cy="8" r="1.5" fill="#89b4fa"/><circle cx="18" cy="8" r="1.5" fill="#89b4fa"/><circle cx="6" cy="16" r="1.5" fill="#89b4fa"/><circle cx="18" cy="16" r="1.5" fill="#89b4fa"/><path d="M12 2l.5 1.5L14 4l-1.5.5L12 6l-.5-1.5L10 4l1.5-.5z" fill="#f9e2af" stroke="none"/></svg>Frappe Copilot</span>
   <span class="badge b-pending" id="st">init</span>
-  <span class="badge b-on" id="token-badge" style="display:none;" title="">~0 tok</span>
   <span class="sep"></span>
-  <select id="mode-select" class="hdr-select" title="Approval mode">
-    <option value="ask">🛡️ Ask</option>
-    <option value="auto">⚡ Auto</option>
-  </select>
-  <select id="model-select" class="hdr-select" title="Select Model" style="display:none;"></select>
+  <span class="badge b-on" id="token-badge" style="display:none;" title="">0k</span>
   <button class="hdr-btn" id="btn-new-chat" title="New Session">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M14 7H9V2H7v5H2v2h5v5h2V9h5V7z"/></svg>
   </button>
@@ -862,13 +1020,6 @@ window.onerror = function(message, source, lineno, colno, error) {
   </div>
   <div id="settings-status" style="font-size:11px; color:var(--vscode-descriptionForeground,#888); min-height:14px; margin-top:2px;"></div>
 </div>
-<div id="todo-panel" class="graph-panel" style="display:none;">
-  <div class="graph-hdr">
-    <span>📋 AI Task List: <strong id="todo-title">Tasks for this Conversation</strong></span>
-    <button id="btn-toggle-todo" class="tool-btn" style="padding: 2px 8px; font-size: 10px;">Collapse</button>
-  </div>
-  <div id="todo-list" style="display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:180px; overflow-y:auto; padding:4px 0;"></div>
-</div>
 <div id="graph-panel" class="graph-panel" style="display:none;">
   <div class="graph-hdr">
     <span>📋 Workflow Execution Plan: <strong id="graph-title">...</strong></span>
@@ -906,45 +1057,79 @@ window.onerror = function(message, source, lineno, colno, error) {
 </div>
 <div id="chat">
   <div class="welcome-container">
-    <div class="welcome-logo">✦</div>
-    <div class="welcome-title">Frappe Copilot</div>
-    <div class="welcome-subtitle">Your AI coding partner for building, customizing, and debugging applications in the Frappe/ERPNext framework.</div>
-    <div class="welcome-grid">
-      <div class="welcome-card" onclick="fillInput('Introspect DocType ')">
-        <div class="welcome-card-icon">📊</div>
-        <div class="welcome-card-title">Introspect DocType</div>
-        <div class="welcome-card-desc">Inspect properties and fields of any DocType in your active workspace.</div>
-      </div>
-      <div class="welcome-card" onclick="fillInput('Create custom theme for Desk')">
-        <div class="welcome-card-icon">💡</div>
-        <div class="welcome-card-title">Theme / Customize</div>
-        <div class="welcome-card-desc">Write CSS/JS overrides or build custom app templates for ERPNext.</div>
-      </div>
-      <div class="welcome-card" onclick="fillInput('Show active apps and sites')">
-        <div class="welcome-card-icon">📁</div>
-        <div class="welcome-card-title">Explore Apps</div>
-        <div class="welcome-card-desc">Scan installed apps and sites configured in the active bench.</div>
-      </div>
-      <div class="welcome-card" onclick="fillInput('Run bench migrate')">
-        <div class="welcome-card-icon">💻</div>
-        <div class="welcome-card-title">Bench Tools</div>
-        <div class="welcome-card-desc">Run migrations, build assets, and execute developer commands.</div>
-      </div>
+    <div class="welcome-mark"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="#89b4fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M6 8h4l2-3 2 3h4"/><path d="M6 16h12"/><path d="M8 8v8"/><path d="M16 8v8"/><circle cx="6" cy="8" r="1.5" fill="#89b4fa"/><circle cx="18" cy="8" r="1.5" fill="#89b4fa"/><circle cx="6" cy="16" r="1.5" fill="#89b4fa"/><circle cx="18" cy="16" r="1.5" fill="#89b4fa"/><path d="M12 2l.5 1.5L14 4l-1.5.5L12 6l-.5-1.5L10 4l1.5-.5z" fill="#f9e2af" stroke="none"/></svg></div>
+    <div class="welcome-title">What are we building today?</div>
+    <div class="welcome-subtitle">I can read your bench, edit app code, run bench commands and tests, and customize DocTypes on your site.</div>
+    <div class="welcome-chips">
+      <button class="chip" onclick="fillInput('Add a validation to ')">Add a validation</button>
+      <button class="chip" onclick="fillInput('Create a new DocType for ')">Create a DocType</button>
+      <button class="chip" onclick="fillInput('Why does bench migrate fail? ')">Debug a migrate</button>
+      <button class="chip" onclick="fillInput('Explain how this app is structured')">Explain this app</button>
     </div>
   </div>
 </div>
 <div id="atc"><img id="atc-thumb" alt="" style="display:none;"><span class="nm" id="fn"></span><button class="rm" id="rma">✕</button></div>
 <div id="skill-atc"><span class="nm" id="skill-atc-name"></span><button class="rm" id="skill-atc-rm">✕</button></div>
 <div id="bot">
-  <input type="file" id="fi" accept=".pdf,.html,.htm,.png,.jpg,.jpeg,.gif,.webp">
-  <button class="btn" id="upb" title="Attach file">
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M11.5 3.5a3 3 0 0 0-4.24 0L3.05 7.71a2.12 2.12 0 1 0 3 3l4.21-4.21a1.2 1.2 0 1 0-1.7-1.7L4.76 8.59l-.7-.7 3.79-3.79a2.2 2.2 0 1 1 3.11 3.11l-4.21 4.21a3.12 3.12 0 0 1-4.41-4.41L8.5 2.8a4 4 0 1 1 5.66 5.66l-5.3 5.3-.7-.7 5.3-5.3a3 3 0 0 0-1.96-4.26z"/></svg>
-  </button>
-  <div id="inp" contenteditable="true" placeholder="Ask about Frappe/ERPNext..."></div>
-  <button class="btn" id="snd" disabled title="Send">
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 15a7 7 0 1 0 0-14 7 7 0 0 0 0 14zm-.5-8.707l-2.146 2.147-.708-.707L8 4.379l3.354 3.354-.708.707L8 6.293V12H7V6.293z"/></svg>
-  </button>
+  <div id="todo-dock" class="todo-dock">
+    <button class="todo-head" id="todo-head" aria-expanded="true">
+      <span class="todo-progress" id="todo-progress"></span>
+      <span class="todo-current" id="todo-current"></span>
+      <span class="todo-count" id="todo-count"></span>
+      <svg class="todo-chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 15l6-6 6 6"/></svg>
+    </button>
+    <ol class="todo-items" id="todo-items"></ol>
+    <div class="todo-stale" id="todo-stale">
+      <span id="todo-stale-text"></span>
+      <button class="todo-clear" id="todo-clear">Clear</button>
+    </div>
+  </div>
+  <div class="composer">
+    <div id="inp" contenteditable="true" placeholder="Ask about your Frappe app…"></div>
+    <div class="composer-bar">
+      <input type="file" id="fi" accept=".pdf,.html,.htm,.png,.jpg,.jpeg,.gif,.webp">
+      <button class="btn icon-btn" id="upb" title="Attach file">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+      </button>
+      <select id="mode-select" class="pill-select" title="Approval mode">
+        <option value="ask">Ask before edits</option>
+        <option value="auto">Auto-approve</option>
+      </select>
+      <span class="sep"></span>
+      <div class="effort-picker" id="effort-picker" style="display:none;">
+        <button class="pill" id="effort-btn" title="Reasoning effort"><span id="effort-btn-label">Effort</span></button>
+        <div class="effort-pop" id="effort-pop">
+          <div class="effort-head">
+            <span class="effort-title">Effort</span>
+            <span class="effort-value" id="effort-value">Medium</span>
+            <span class="effort-help" title="How long the model reasons before answering. Lower is faster and cheaper; higher is more thorough on hard coding tasks.">?</span>
+          </div>
+          <div class="effort-scale"><span>Faster</span><span>Smarter</span></div>
+          <div class="effort-track" id="effort-track" role="slider" tabindex="0" aria-label="Effort"></div>
+          <div class="effort-recs" id="effort-recs"></div>
+          <button class="effort-reset" id="effort-reset">Use model default</button>
+        </div>
+      </div>
+      <div class="model-picker" id="model-picker">
+        <button class="pill" id="model-btn" title="Choose model"><span id="model-btn-label">Model</span><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></button>
+        <div class="model-pop" id="model-pop" role="listbox">
+          <input id="model-search" class="model-search" placeholder="Search models…" autocomplete="off">
+          <div class="model-list" id="model-list"></div>
+          <div class="model-foot">
+            <span id="model-fetched">Not fetched yet</span>
+            <button class="model-refresh" id="model-refresh" title="Pull the latest model list from the provider">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+      <select id="model-select" style="display:none;"></select>
+      <button class="btn" id="snd" disabled title="Send (Enter)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+    </div>
+  </div>
   <div id="slash-menu-container"></div>
+</div>
 </div>
 <script>
 (function(){
@@ -1000,6 +1185,13 @@ window.onerror = function(message, source, lineno, colno, error) {
     read_file: { icon: '🔍', title: 'Read File' },
     write_file: { icon: '📝', title: 'Write New File' },
     edit_file: { icon: '⚡', title: 'Edit File' },
+    multi_edit: { icon: '⚡', title: 'Multi-Edit File' },
+    glob: { icon: '🗂️', title: 'Find Files' },
+    command_output: { icon: '📟', title: 'Command Output' },
+    kill_command: { icon: '⏹️', title: 'Stop Command' },
+    task: { icon: '🧭', title: 'Sub-agent Task' },
+    search_knowledge: { icon: '📚', title: 'Search Knowledge Base' },
+    list_doctypes: { icon: '🗂️', title: 'List DocTypes' },
     list_dir: { icon: '📁', title: 'List Directory' },
     grep_search: { icon: '🔎', title: 'Search Codebase' },
     execute_command: { icon: '💻', title: 'Execute Command' },
@@ -1055,9 +1247,11 @@ window.onerror = function(message, source, lineno, colno, error) {
   }
 
   var thinkEl = null;
-  var thinkTimerInterval = null;
-  var thinkStartTime = 0;
   var thinkRetryCount = 0;
+  /** When the current prompt's run started — the status-line timer counts
+   *  the whole run (all steps, tools, and approvals), not one step. */
+  var runStartTime = 0;
+  var SPARK_SVG = '<svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1l2.2 6.8L21 10l-6.8 2.2L12 19l-2.2-6.8L3 10l6.8-2.2z" fill="currentColor"/></svg>';
 
   function appendToChat(el) {
     if (thinkEl && ch.contains(thinkEl)) {
@@ -1068,70 +1262,76 @@ window.onerror = function(message, source, lineno, colno, error) {
     stickScroll();
   }
 
+  function fmtDur(ms) {
+    var s = ms / 1000;
+    if (s < 10) return s.toFixed(1) + 's';
+    if (s < 60) return Math.round(s) + 's';
+    var m = Math.floor(s / 60);
+    return m + 'm ' + String(Math.round(s % 60)).padStart(2, '0') + 's';
+  }
+
+  /** One ticker drives the run timer and every running tool's duration. */
+  setInterval(function() {
+    if (thinkEl && runStartTime) {
+      var timerEl = thinkEl.querySelector('#think-timer');
+      if (timerEl) timerEl.textContent = fmtDur(Date.now() - runStartTime);
+    }
+    document.querySelectorAll('.tool-card.running').forEach(function(card) {
+      var t = card.querySelector('.tool-time');
+      if (t && card.dataset.start) t.textContent = fmtDur(Date.now() - Number(card.dataset.start));
+    });
+  }, 250);
+
   function showThinking(phaseLabel, retryCount) {
     thinkRetryCount = retryCount || 0;
+    if (!runStartTime) runStartTime = Date.now();
     if (!thinkEl) {
       thinkEl = document.createElement('div');
       thinkEl.className = 'msg thinking';
       thinkEl.innerHTML =
-        '<div class="ln"></div>' +
-        '<div class="dot d-assistant"></div>' +
-        '<div class="bub">' +
-          '<div class="think-row">' +
-            '<div class="think-dots"><span></span><span></span><span></span></div>' +
-            '<span class="think-label" id="think-label-text">Thinking...</span>' +
-          '</div>' +
-          '<div class="think-meta">' +
-            '<span class="think-timer" id="think-timer">0s</span>' +
-            '<span class="think-phase" id="think-phase"></span>' +
-            '<span class="think-retry" id="think-retry" style="display:none;"></span>' +
-          '</div>' +
-        '</div>';
+        '<div class="bub"><div class="status-line">' + SPARK_SVG +
+          '<span class="think-label" id="think-label-text">Working</span>' +
+          '<span class="think-timer" id="think-timer">' + fmtDur(Date.now() - runStartTime) + '</span>' +
+          '<span class="think-phase" id="think-phase"></span>' +
+          '<span class="think-retry" id="think-retry" style="display:none;"></span>' +
+          '<span class="think-hint">esc to interrupt</span>' +
+        '</div></div>';
       ch.appendChild(thinkEl);
-      stickScroll();
-      thinkStartTime = Date.now();
-
-      thinkTimerInterval = setInterval(function() {
-        if (!thinkEl) { clearInterval(thinkTimerInterval); return; }
-        var elapsed = Math.round((Date.now() - thinkStartTime) / 1000);
-        var timerEl = thinkEl.querySelector('#think-timer');
-        if (timerEl) timerEl.textContent = elapsed + 's';
-      }, 1000);
     }
-    // Update phase and retry info
-    var phaseEl = thinkEl && thinkEl.querySelector('#think-phase');
-    var retryEl = thinkEl && thinkEl.querySelector('#think-retry');
-    if (phaseEl) phaseEl.textContent = phaseLabel || '';
-    if (retryEl) {
-      if (thinkRetryCount > 0) {
-        retryEl.style.display = 'inline';
-        retryEl.textContent = '↻ Retry ' + thinkRetryCount + '/3';
-      } else {
-        retryEl.style.display = 'none';
-      }
-    }
+    var phaseEl = thinkEl.querySelector('#think-phase');
+    if (phaseEl) phaseEl.textContent = phaseLabel ? '· ' + phaseLabel : '';
+    setRetry(thinkRetryCount);
     stickScroll();
   }
 
+  function setRetry(count) {
+    var retryEl = thinkEl && thinkEl.querySelector('#think-retry');
+    if (!retryEl) return;
+    retryEl.style.display = count > 0 ? 'inline' : 'none';
+    retryEl.textContent = count > 0 ? '↻ retry ' + count : '';
+  }
+
   function removeThinking() {
-    if (thinkTimerInterval) { clearInterval(thinkTimerInterval); thinkTimerInterval = null; }
     if (thinkEl) { thinkEl.remove(); thinkEl = null; }
   }
 
   function updateThinkPhase(label, retryCount) {
     if (!thinkEl) { showThinking(label, retryCount); return; }
     var phaseEl = thinkEl.querySelector('#think-phase');
-    var retryEl = thinkEl.querySelector('#think-retry');
-    if (phaseEl) phaseEl.textContent = label || '';
-    if (retryEl && retryCount !== undefined) {
-      thinkRetryCount = retryCount;
-      if (retryCount > 0) {
-        retryEl.style.display = 'inline';
-        retryEl.textContent = '↻ Retry ' + retryCount + '/3';
-      } else {
-        retryEl.style.display = 'none';
-      }
-    }
+    if (phaseEl) phaseEl.textContent = label ? '· ' + label : '';
+    if (retryCount !== undefined) { thinkRetryCount = retryCount; setRetry(retryCount); }
+  }
+
+  /** Ends the run timer and leaves a "Worked for …" line under the reply. */
+  function finishRunTimer() {
+    if (!runStartTime) return;
+    var elapsed = Date.now() - runStartTime;
+    runStartTime = 0;
+    if (elapsed < 1000) return;
+    var done = document.createElement('div');
+    done.className = 'run-done';
+    done.innerHTML = '<svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="#89b4fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M6 8h4l2-3 2 3h4"/><path d="M6 16h12"/><path d="M8 8v8"/><path d="M16 8v8"/><circle cx="6" cy="8" r="1.5" fill="#89b4fa"/><circle cx="18" cy="8" r="1.5" fill="#89b4fa"/><circle cx="6" cy="16" r="1.5" fill="#89b4fa"/><circle cx="18" cy="16" r="1.5" fill="#89b4fa"/><path d="M12 2l.5 1.5L14 4l-1.5.5L12 6l-.5-1.5L10 4l1.5-.5z" fill="#f9e2af" stroke="none"/></svg>Worked for ' + fmtDur(elapsed);
+    appendToChat(done);
   }
 
   var AGENT_META = {
@@ -1154,20 +1354,36 @@ window.onerror = function(message, source, lineno, colno, error) {
 
   /** Skill lifecycle badge: auto-selected for the request, explicitly loaded by
    *  the model via use_skill, or newly added to the library. */
+  /** Loaded skills collapse into one row of chips per burst (a request's
+   *  auto-loads, or consecutive use_skill calls); hover shows why. */
   function showSkillEvent(m) {
-    var created = m.kind === 'created';
-    var label = created
-      ? '✨ Skill created: ' + esc(m.name)
-      : '📚 Skill loaded' + (m.auto ? ' (auto)' : '') + ': ' + esc(m.name);
-
-    var d = document.createElement('div');
-    d.className = 'msg system-msg skill-badge-msg';
-    d.innerHTML = '<div class="ln"></div><div class="dot d-system"></div><div class="bub">' +
-      '<span class="badge ' + (created ? 'b-skill-new' : 'b-skill') + '">' + label + '</span>' +
-      (created && m.description ? '<div class="skill-badge-desc">' + esc(m.description) + '</div>' : '') +
-      '</div>';
-    appendToChat(d);
+    if (m.kind === 'created') {
+      var d = document.createElement('div');
+      d.className = 'msg system-msg skill-badge-msg';
+      d.innerHTML = '<div class="bub"><span class="badge b-skill-new">Skill created: ' + esc(m.name) + '</span>' +
+        (m.description ? '<div class="skill-badge-desc">' + esc(m.description) + '</div>' : '') + '</div>';
+      appendToChat(d);
+      return;
+    }
+    var row = lastSkillRow();
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'skill-row';
+      row.innerHTML = '<span class="skill-row-label">Skills</span>';
+      appendToChat(row);
+    }
+    var isRef = String(m.id).indexOf('/') >= 0;
+    var chip = document.createElement('span');
+    chip.className = 'skill-chip' + (isRef ? ' ref' : '');
+    chip.textContent = isRef ? String(m.id).split('/').pop() : (m.id || m.name);
+    chip.title = (m.auto ? 'Auto-loaded' : 'Loaded by the agent') + (m.reason ? ' — ' + m.reason : '');
+    row.appendChild(chip);
     stickScroll();
+  }
+
+  function lastSkillRow() {
+    var last = thinkEl && thinkEl.previousElementSibling ? thinkEl.previousElementSibling : ch.lastElementChild;
+    return last && last.classList.contains('skill-row') ? last : null;
   }
 
   function showVerifyApproval(m) {
@@ -1369,15 +1585,14 @@ window.onerror = function(message, source, lineno, colno, error) {
     var pct = m.budget ? (m.estimatedTokens / m.budget) : 0;
     var cls = pct > 0.85 ? 'b-warn' : pct > 0.6 ? 'b-pending' : 'b-on';
     el.className = 'badge ' + cls;
-    el.textContent = '~' + Math.round(m.estimatedTokens/1000) + 'k tok';
-    el.title = '~' + m.estimatedTokens + ' estimated tokens of conversation history (conservative ' + Math.round(m.budget/1000) + 'k budget, not model-specific). Covers conversation history only, not the RAG/schema/skills-catalog additions to the system prompt.';
+    el.textContent = (m.live ? '' : '~') + Math.round(m.estimatedTokens/1000) + 'k / ' + Math.round(m.budget/1000) + 'k';
+    el.title = m.live
+      ? m.estimatedTokens + ' tokens in the last model call (' + Math.round(pct * 100) + '% of the ' + Math.round(m.budget/1000) + 'k context window).'
+      : '~' + m.estimatedTokens + ' estimated tokens of conversation history (' + Math.round(pct * 100) + '% of the ' + Math.round(m.budget/1000) + 'k context window).';
     el.style.display = 'inline-block';
   }
 
   function addMsg(r,c,meta){
-    if (r === 'assistant') {
-      removeThinking();
-    }
     // Filter out raw tool result messages from the visible chat bubble log
     if (r === 'user' && c.trim().startsWith('<tool_result name=')) {
       return;
@@ -1548,8 +1763,13 @@ window.onerror = function(message, source, lineno, colno, error) {
       var step = document.createElement('div');
       step.className = 'run-step';
       if (e.role === 'assistant') {
-        var text = stripToolCalls(e.content).trim();
-        step.innerHTML = '<div class="run-step-label">Assistant</div>' + md(text || '_(tool call only)_');
+        var text = stripToolCalls(e.content || '').trim();
+        var calls = (e.toolCalls || []).map(function(c) { return '`' + c.name + '`'; }).join(', ');
+        step.innerHTML = '<div class="run-step-label">Assistant</div>' + md(text || (calls ? '_Calls: ' + calls + '_' : '_(tool call only)_'));
+      } else if (e.toolResults && e.toolResults.length) {
+        step.innerHTML = e.toolResults.map(function(r) {
+          return '<div class="run-step-label">Tool result: ' + esc(r.name) + (r.isError ? ' (error)' : '') + '</div><pre class="tool-out show">' + esc(r.content || '') + '</pre>';
+        }).join('') + (e.content ? md(e.content) : '');
       } else {
         var toolMatch = e.content.match(/^<tool_result name="([^"]+)">/);
         var label = toolMatch ? 'Tool result: ' + esc(toolMatch[1]) : 'Result';
@@ -1675,14 +1895,21 @@ window.onerror = function(message, source, lineno, colno, error) {
 
   ip.addEventListener('input',function(){updBtn();updateSlashMenu();});
   function updBtn(){
-    if (isSt) {
+    if (isSt && ip.innerText.trim()) {
       sd.disabled = false;
-      sd.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>';
-      sd.title = 'Stop';
+      sd.classList.remove('stop');
+      sd.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+      sd.title = 'Queue message (sent when the agent finishes)';
+    } else if (isSt) {
+      sd.disabled = false;
+      sd.classList.add('stop');
+      sd.innerHTML = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="2.5"/></svg>';
+      sd.title = 'Stop (Esc)';
     } else {
       sd.disabled = (!ip.innerText.trim() && !attachedFile);
-      sd.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 15a7 7 0 1 0 0-14 7 7 0 0 0 0 14zm-.5-8.707l-2.146 2.147-.708-.707L8 4.379l3.354 3.354-.708.707L8 6.293V12H7V6.293z"/></svg>';
-      sd.title = 'Send';
+      sd.classList.remove('stop');
+      sd.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+      sd.title = 'Send (Enter)';
     }
   }
 
@@ -1762,11 +1989,16 @@ window.onerror = function(message, source, lineno, colno, error) {
 
   // send message + optionally file
   function send(){
-    if(isSt) {
-      vs.postMessage({ type: 'abort' });
-      removeThinking();
-      isSt = false;
+    if (isSt && ip.innerText.trim()) {
+      // Typing while the agent works queues the message instead of stopping it.
+      queuedMessages.push(ip.innerText.trim());
+      ip.innerText = '';
+      renderQueue();
       updBtn();
+      return;
+    }
+    if(isSt) {
+      stopRun();
       return;
     }
     var text=ip.innerText.trim();
@@ -1952,7 +2184,239 @@ window.onerror = function(message, source, lineno, colno, error) {
   };
   modelSelect.onchange = function() {
     vs.postMessage({ type: 'selectModel', model: modelSelect.value });
+    modelState.active = modelSelect.value;
+    renderModelPicker();
   };
+
+  // ── Model picker ──────────────────────────────────────────────────────
+  var modelState = { models: [], active: '', fetchedAt: 0, loading: false, error: '' };
+  var modelBtnLabel = document.getElementById('model-btn-label');
+  var modelPop = document.getElementById('model-pop');
+  var modelSearch = document.getElementById('model-search');
+  var modelListEl = document.getElementById('model-list');
+  var modelFetchedEl = document.getElementById('model-fetched');
+  var modelRefreshBtn = document.getElementById('model-refresh');
+  var modelKb = -1;
+
+  /** 'claude-opus-5-5' → 'Opus 5.5', 'claude-haiku-4-5-20251001' → 'Haiku 4.5'. */
+  function prettyModel(id) {
+    var m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(id || '');
+    if (m) return m[1].charAt(0).toUpperCase() + m[1].slice(1) + ' ' + m[2] + (m[3] ? '.' + m[3] : '');
+    return id || 'Model';
+  }
+
+  function timeAgo(ts) {
+    if (!ts) return 'Not fetched yet';
+    var s = Math.round((Date.now() - ts) / 1000);
+    if (s < 45) return 'Updated just now';
+    if (s < 3600) return 'Updated ' + Math.round(s / 60) + 'm ago';
+    return 'Updated ' + Math.round(s / 3600) + 'h ago';
+  }
+
+  function filteredModels() {
+    var q = (modelSearch.value || '').toLowerCase().trim();
+    return modelState.models.filter(function(id) {
+      return !q || id.toLowerCase().indexOf(q) >= 0 || prettyModel(id).toLowerCase().indexOf(q) >= 0;
+    });
+  }
+
+  function renderModelPicker() {
+    modelBtnLabel.textContent = prettyModel(modelState.active);
+    modelBtnLabel.parentNode.title = modelState.active || 'Choose model';
+    var list = filteredModels();
+    if (list.length === 0) {
+      modelListEl.innerHTML = '<div class="model-empty">' + (modelState.models.length ? 'No models match.' : 'No models loaded — try Refresh.') + '</div>';
+    } else {
+      // The provider lists newest first; flag the top few as new.
+      var newest = modelState.models.slice(0, 3);
+      modelListEl.innerHTML = list.map(function(id, i) {
+        var active = id === modelState.active;
+        return '<div class="model-item' + (i === modelKb ? ' kb' : '') + '" data-id="' + esc(id) + '" role="option" aria-selected="' + active + '">' +
+          '<span class="mi-check">' + (active ? '✓' : '') + '</span>' +
+          '<span class="mi-text"><span class="mi-name">' + esc(prettyModel(id)) + '</span>' +
+          (prettyModel(id) !== id ? '<span class="mi-id">' + esc(id) + '</span>' : '') + '</span>' +
+          (newest.indexOf(id) >= 0 && /^claude-/.test(id) ? '<span class="mi-new">latest</span>' : '') +
+        '</div>';
+      }).join('');
+    }
+    modelFetchedEl.textContent = modelState.loading ? 'Fetching from provider…' : (modelState.error ? 'Fetch failed — showing cached list' : timeAgo(modelState.fetchedAt));
+    modelRefreshBtn.classList.toggle('loading', modelState.loading);
+  }
+
+  function pickModel(id) {
+    if (!id) return;
+    if (!Array.prototype.some.call(modelSelect.options, function(o) { return o.value === id; })) {
+      var opt = document.createElement('option');
+      opt.value = id; opt.textContent = id;
+      modelSelect.appendChild(opt);
+    }
+    modelSelect.value = id;
+    modelSelect.dispatchEvent(new Event('change'));
+    closeModelPicker();
+  }
+
+  function openModelPicker() {
+    modelPop.classList.add('open');
+    modelSearch.value = '';
+    modelKb = -1;
+    renderModelPicker();
+    setTimeout(function() { modelSearch.focus(); }, 0);
+  }
+  function closeModelPicker() { modelPop.classList.remove('open'); }
+
+  document.getElementById('model-btn').onclick = function(e) {
+    e.stopPropagation();
+    if (modelPop.classList.contains('open')) closeModelPicker(); else openModelPicker();
+  };
+  modelPop.onclick = function(e) { e.stopPropagation(); };
+  document.addEventListener('click', closeModelPicker);
+  modelListEl.onclick = function(e) {
+    var item = e.target.closest('.model-item');
+    if (item) pickModel(item.getAttribute('data-id'));
+  };
+  modelSearch.oninput = function() { modelKb = 0; renderModelPicker(); };
+  modelSearch.onkeydown = function(e) {
+    var list = filteredModels();
+    if (e.key === 'ArrowDown') { e.preventDefault(); modelKb = Math.min(list.length - 1, modelKb + 1); renderModelPicker(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); modelKb = Math.max(0, modelKb - 1); renderModelPicker(); }
+    else if (e.key === 'Enter') { e.preventDefault(); pickModel(list[Math.max(0, modelKb)]); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeModelPicker(); ip.focus(); }
+  };
+  modelRefreshBtn.onclick = function() {
+    modelState.loading = true;
+    modelState.error = '';
+    renderModelPicker();
+    vs.postMessage({ type: 'refreshModels' });
+  };
+  // Keep "Updated Xm ago" honest while the picker is open.
+  setInterval(function() { if (modelPop.classList.contains('open') && !modelState.loading) renderModelPicker(); }, 30000);
+
+
+  // ── Effort picker ─────────────────────────────────────────────────────
+  var EFFORT_LABEL = { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max' };
+  var effortState = { levels: [], recommended: null, effort: null };
+  var effortPicker = document.getElementById('effort-picker');
+  var effortPop = document.getElementById('effort-pop');
+  var effortTrack = document.getElementById('effort-track');
+  var effortBtn = document.getElementById('effort-btn');
+
+  /** The level in effect: the user's pick, else the model's default. */
+  function activeEffort() {
+    var e = effortState.effort;
+    if (e && effortState.levels.indexOf(e) < 0) e = null;
+    return e || effortState.recommended || effortState.levels[0] || null;
+  }
+
+  function renderEffort() {
+    var levels = effortState.levels;
+    effortPicker.style.display = levels.length ? '' : 'none';
+    if (!levels.length) { effortPop.classList.remove('open'); return; }
+    var active = activeEffort();
+    document.getElementById('effort-btn-label').textContent = EFFORT_LABEL[active] || 'Effort';
+    effortBtn.classList.toggle('custom', !!effortState.effort);
+    effortBtn.title = 'Reasoning effort: ' + (EFFORT_LABEL[active] || '') + (effortState.effort ? '' : ' (model default)');
+    document.getElementById('effort-value').textContent = EFFORT_LABEL[active] || '';
+    effortTrack.setAttribute('aria-valuetext', EFFORT_LABEL[active] || '');
+    effortTrack.innerHTML = levels.map(function(l) {
+      return '<span class="effort-stop' + (l === active ? ' active' : '') + '" data-level="' + l + '" title="' + EFFORT_LABEL[l] + '"></span>';
+    }).join('');
+    document.getElementById('effort-recs').innerHTML = levels.map(function(l) {
+      return '<span>' + (l === effortState.recommended ? 'Recommended' : '') + '</span>';
+    }).join('');
+    document.getElementById('effort-reset').style.display = effortState.effort ? '' : 'none';
+  }
+
+  function setEffort(level) {
+    effortState.effort = level;
+    renderEffort();
+    vs.postMessage({ type: 'setEffort', effort: level || '' });
+  }
+
+  /** Nearest stop to a pointer x position on the track. */
+  function effortAt(clientX) {
+    var stops = effortTrack.querySelectorAll('.effort-stop');
+    var best = null, bestDist = Infinity;
+    stops.forEach(function(stop) {
+      var r = stop.getBoundingClientRect();
+      var d = Math.abs(clientX - (r.left + r.width / 2));
+      if (d < bestDist) { bestDist = d; best = stop.getAttribute('data-level'); }
+    });
+    return best;
+  }
+
+  effortBtn.onclick = function(e) {
+    e.stopPropagation();
+    closeModelPicker();
+    effortPop.classList.toggle('open');
+    if (effortPop.classList.contains('open')) { renderEffort(); effortTrack.focus(); }
+  };
+  effortPop.onclick = function(e) { e.stopPropagation(); };
+  document.addEventListener('click', function() { effortPop.classList.remove('open'); });
+  var effortDragging = false;
+  effortTrack.addEventListener('pointerdown', function(e) {
+    effortDragging = true;
+    effortTrack.setPointerCapture(e.pointerId);
+    var l = effortAt(e.clientX); if (l) setEffort(l);
+  });
+  effortTrack.addEventListener('pointermove', function(e) {
+    if (!effortDragging) return;
+    var l = effortAt(e.clientX);
+    if (l && l !== activeEffort()) setEffort(l);
+  });
+  effortTrack.addEventListener('pointerup', function() { effortDragging = false; });
+  effortTrack.addEventListener('keydown', function(e) {
+    var levels = effortState.levels, i = levels.indexOf(activeEffort());
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); setEffort(levels[Math.min(levels.length - 1, i + 1)]); }
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); setEffort(levels[Math.max(0, i - 1)]); }
+    else if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); effortPop.classList.remove('open'); ip.focus(); }
+  });
+  document.getElementById('effort-reset').onclick = function() { setEffort(null); };
+
+  // ── Queued messages (typed while the agent is working) ────────────────
+  var queuedMessages = [];
+  var queueEl = document.createElement('div');
+  queueEl.id = 'queue';
+  document.getElementById('bot').insertBefore(queueEl, document.querySelector('#bot .composer'));
+
+  function renderQueue() {
+    queueEl.classList.toggle('show', queuedMessages.length > 0);
+    queueEl.innerHTML = queuedMessages.map(function(t, i) {
+      return '<div class="queued"><span class="q-text" title="' + esc(t) + '">Queued: ' + esc(t) + '</span>' +
+        '<button class="q-rm" data-i="' + i + '" title="Remove">✕</button></div>';
+    }).join('');
+  }
+  queueEl.onclick = function(e) {
+    var b = e.target.closest('.q-rm');
+    if (!b) return;
+    queuedMessages.splice(Number(b.getAttribute('data-i')), 1);
+    renderQueue();
+  };
+
+  /** Sends the next queued message once the agent goes idle. */
+  function flushQueue() {
+    if (isSt || queuedMessages.length === 0) return;
+    var next = queuedMessages.shift();
+    renderQueue();
+    ip.innerText = next;
+    send();
+  }
+
+  // Esc interrupts a running agent (unless a popup is handling it).
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape' || !isSt || e.defaultPrevented) return;
+    if (modelPop.classList.contains('open') || effortPop.classList.contains('open') || slashMenuOpen) return;
+    e.preventDefault();
+    stopRun();
+  });
+
+  function stopRun() {
+    vs.postMessage({ type: 'abort' });
+    removeThinking();
+    finishRunTimer();
+    isSt = false;
+    updBtn();
+  }
+
 
   var modeSelect = document.getElementById('mode-select');
   function paintModeSelect() {
@@ -2154,139 +2618,107 @@ window.onerror = function(message, source, lineno, colno, error) {
   };
 
   function showWelcomeScreen() {
-    ch.innerHTML =
-      '<div class="welcome-container">' +
-        '<div class="welcome-logo">✦</div>' +
-        '<div class="welcome-title">Frappe Copilot</div>' +
-        '<div class="welcome-subtitle">Your AI coding partner for building, customizing, and debugging applications in the Frappe/ERPNext framework.</div>' +
-        '<div class="welcome-grid">' +
-          '<div class="welcome-card" onclick="fillInput(\'Introspect DocType \')">' +
-            '<div class="welcome-card-icon">📊</div>' +
-            '<div class="welcome-card-title">Introspect DocType</div>' +
-            '<div class="welcome-card-desc">Inspect properties and fields of any DocType in your active workspace.</div>' +
-          '</div>' +
-          '<div class="welcome-card" onclick="fillInput(\'Create custom theme for Desk\')">' +
-            '<div class="welcome-card-icon">💡</div>' +
-            '<div class="welcome-card-title">Theme / Customize</div>' +
-            '<div class="welcome-card-desc">Write CSS/JS overrides or build custom app templates for ERPNext.</div>' +
-          '</div>' +
-          '<div class="welcome-card" onclick="fillInput(\'Show active apps and sites\')">' +
-            '<div class="welcome-card-icon">📁</div>' +
-            '<div class="welcome-card-title">Explore Apps</div>' +
-            '<div class="welcome-card-desc">Scan installed apps and sites configured in the active bench.</div>' +
-          '</div>' +
-          '<div class="welcome-card" onclick="fillInput(\'Run bench migrate\')">' +
-            '<div class="welcome-card-icon">💻</div>' +
-            '<div class="welcome-card-title">Bench Tools</div>' +
-            '<div class="welcome-card-desc">Run migrations, build assets, and execute developer commands.</div>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
+    ch.innerHTML = '<div class="welcome-container">\n    <div class="welcome-mark"><svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="#89b4fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M6 8h4l2-3 2 3h4"/><path d="M6 16h12"/><path d="M8 8v8"/><path d="M16 8v8"/><circle cx="6" cy="8" r="1.5" fill="#89b4fa"/><circle cx="18" cy="8" r="1.5" fill="#89b4fa"/><circle cx="6" cy="16" r="1.5" fill="#89b4fa"/><circle cx="18" cy="16" r="1.5" fill="#89b4fa"/><path d="M12 2l.5 1.5L14 4l-1.5.5L12 6l-.5-1.5L10 4l1.5-.5z" fill="#f9e2af" stroke="none"/></svg></div>\n    <div class="welcome-title">What are we building today?</div>\n    <div class="welcome-subtitle">I can read your bench, edit app code, run bench commands and tests, and customize DocTypes on your site.</div>\n    <div class="welcome-chips">\n      <button class="chip" onclick="fillInput(\'Add a validation to \')">Add a validation</button>\n      <button class="chip" onclick="fillInput(\'Create a new DocType for \')">Create a DocType</button>\n      <button class="chip" onclick="fillInput(\'Why does bench migrate fail? \')">Debug a migrate</button>\n      <button class="chip" onclick="fillInput(\'Explain how this app is structured\')">Explain this app</button>\n    </div>\n  </div>';
   }
 
   var seThought = null;
   var seContent = null;
   var seRawText = '';
   var seRawThought = '';
+  /** Per-stream state, so parallel sub-agent streams each fill their own bubble. */
+  var streamStates = {};
+  function useStream(id) {
+    var st = streamStates[id];
+    if (st) { seThought = st.thought; seContent = st.content; seRawText = st.raw; seRawThought = st.rawThought; }
+  }
+  function saveStream(id) {
+    var st = streamStates[id];
+    if (st) { st.raw = seRawText; st.rawThought = seRawThought; }
+  }
 
   window.toggleThought = function(hdr) {
-    var container = hdr.closest('.thought-container');
-    var body = container.querySelector('.thought-body');
-    var toggleBtn = container.querySelector('.thought-toggle');
-    if (body.style.display === 'none') {
-      body.style.display = 'block';
-      toggleBtn.textContent = '[Collapse]';
-    } else {
-      body.style.display = 'none';
-      toggleBtn.textContent = '[Expand]';
-    }
+    var shell = hdr.closest('.thought-shell');
+    if (shell) shell.classList.toggle('open');
   };
 
+  var CHEV_SVG = '<svg class="chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>';
+
+  function thoughtShellHtml(label, open) {
+    return '<div class="thought-shell' + (open ? ' open' : '') + '">' +
+      '<div class="thought-hdr" onclick="toggleThought(this)">' + CHEV_SVG + '<span class="thought-label">' + label + '</span></div>' +
+      '<div class="thought-body"></div>' +
+    '</div>';
+  }
+
+  /** "Thought for 7s" once reasoning ends; "Thinking…" while it streams. */
+  function finishThought(st) {
+    if (!st || !seThought) return;
+    var label = seThought.querySelector('.thought-label');
+    var shell = seThought.querySelector('.thought-shell');
+    if (!label || !shell || shell.dataset.done) return;
+    shell.dataset.done = '1';
+    shell.classList.remove('open');
+    label.textContent = st.thoughtStart ? 'Thought for ' + fmtDur(Date.now() - st.thoughtStart) : 'Thought process';
+  }
+
   function ss(id){
-    removeThinking();
     isSt=true;updBtn();
     var d=document.createElement('div');
-    d.className='msg';
-    d.innerHTML='<div class="ln"></div><div class="dot d-assistant"></div><div class="bub">' +
+    d.className='msg assistant-msg';
+    d.innerHTML='<div class="bub">' +
       '<div class="bub-thought"></div>' +
-      '<div class="bub-content"><div class="stream-loading" id="sl-'+id+'"><span></span><span></span><span></span></div></div>' +
+      '<div class="bub-content"></div>' +
     '</div>';
     d.id='s-'+id;
     appendToChat(d);
-    
+
     var bub = d.querySelector('.bub');
     seThought = bub.querySelector('.bub-thought');
     seContent = bub.querySelector('.bub-content');
     seRawText = '';
     seRawThought = '';
+    streamStates[id] = { thought: seThought, content: seContent, raw: '', rawThought: '', thoughtStart: 0, el: d };
   }
 
   function sc(id, chunk, reasoning){
+    useStream(id);
+    var st = streamStates[id];
     if (reasoning) {
       if (!seThought.innerHTML) {
-        seThought.innerHTML = 
-          '<div class="thought-container" style="background:rgba(255,255,255,0.02); border-left:3px solid var(--vscode-descriptionForeground,#888); padding:8px 12px; margin-bottom:10px; border-radius:4px; font-size:12px; color:var(--vscode-descriptionForeground,#888); box-shadow:inset 0 0 10px rgba(0,0,0,0.15);">' +
-            '<div class="thought-hdr" onclick="toggleThought(this)" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; margin-bottom:6px; font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; user-select:none;">' +
-              '<span>🧠 Thought Process</span>' +
-              '<span class="thought-toggle" style="font-size:9px; text-decoration:underline;">[Collapse]</span>' +
-            '</div>' +
-            '<div class="thought-body" style="font-family:var(--vscode-font-family, sans-serif); line-height:1.5; opacity:0.85;"></div>' +
-          '</div>';
+        seThought.innerHTML = thoughtShellHtml('Thinking…', true);
+        if (st) st.thoughtStart = Date.now();
       }
       seRawThought += reasoning;
       var body = seThought.querySelector('.thought-body');
-      if (body) {
-        body.innerHTML = md(seRawThought);
-      }
+      if (body) body.innerHTML = md(seRawThought);
     }
-    
-    if (chunk) {
-      var sl = document.getElementById('sl-'+id);
-      if (sl) sl.remove();
-      
-      var thoughtContainer = seThought.querySelector('.thought-container');
-      if (thoughtContainer && !thoughtContainer.dataset.collapsed) {
-        var body = thoughtContainer.querySelector('.thought-body');
-        var toggleBtn = thoughtContainer.querySelector('.thought-toggle');
-        if (body && toggleBtn) {
-          body.style.display = 'none';
-          toggleBtn.textContent = '[Expand]';
-          thoughtContainer.dataset.collapsed = 'true';
-        }
-      }
 
+    if (chunk) {
+      finishThought(st);
       seRawText += chunk;
       seContent.innerHTML = md(stripToolCalls(seRawText).trim());
     }
+    saveStream(id);
     stickScroll();
   }
 
   function sf(id, f, fullReasoning){
-    removeThinking();
-    var sl = document.getElementById('sl-'+id);
-    if (sl) sl.remove();
-    
+    useStream(id);
+    var st = streamStates[id];
+    delete streamStates[id];
+
     if (seContent) {
       seContent.innerHTML = md(stripToolCalls(f).trim());
     }
-    
     if (fullReasoning && seThought) {
-      if (!seThought.innerHTML) {
-        seThought.innerHTML = 
-          '<div class="thought-container" style="background:rgba(255,255,255,0.02); border-left:3px solid var(--vscode-descriptionForeground,#888); padding:8px 12px; margin-bottom:10px; border-radius:4px; font-size:12px; color:var(--vscode-descriptionForeground,#888); box-shadow:inset 0 0 10px rgba(0,0,0,0.15);">' +
-            '<div class="thought-hdr" onclick="toggleThought(this)" style="display:flex; justify-content:space-between; align-items:center; cursor:pointer; margin-bottom:6px; font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:0.5px; user-select:none;">' +
-              '<span>🧠 Thought Process</span>' +
-              '<span class="thought-toggle" style="font-size:9px; text-decoration:underline;">[Expand]</span>' +
-            '</div>' +
-            '<div class="thought-body" style="font-family:var(--vscode-font-family, sans-serif); line-height:1.5; opacity:0.85; display:none;"></div>' +
-          '</div>';
-      }
+      if (!seThought.innerHTML) seThought.innerHTML = thoughtShellHtml('Thought process', false);
       var body = seThought.querySelector('.thought-body');
-      if (body) {
-        body.innerHTML = md(fullReasoning);
-      }
+      if (body) body.innerHTML = md(fullReasoning);
+      finishThought(st);
     }
-    
+    // A step that only called tools leaves an empty bubble behind — drop it.
+    if (st && st.el && !stripToolCalls(f || '').trim() && !fullReasoning) st.el.remove();
+
     seThought = null;
     seContent = null;
     seRawText = '';
@@ -2295,13 +2727,21 @@ window.onerror = function(message, source, lineno, colno, error) {
     flushCustomGraphs();
   }
   function sErr(id,e){
-    removeThinking();
-    if(se){
-      se.innerHTML='<span style="color:var(--vscode-errorForeground,#f48771);font-size:11px;">⚠ ' + esc(e) + '</span>';
-      se=null;
-      seRawText='';
-    }
-    isSt=false;updBtn();
+    useStream(id);
+    var st = streamStates[id];
+    delete streamStates[id];
+    // The extension posts its own error/retry message right after this, so an
+    // empty failed bubble would only repeat it — drop it instead.
+    if (st && st.el && !seRawText.trim() && !seRawThought.trim()) st.el.remove();
+    seThought = null; seContent = null; seRawText = ''; seRawThought = '';
+  }
+
+  /** Tool events carry a callId so parallel calls each update their own
+   *  card; older events without one fall back to the most recent card. */
+  var toolCards = {};
+  function resolveToolCard(m) {
+    if (m.callId && toolCards[m.callId]) return toolCards[m.callId];
+    return { card: curToolCard, set streamed(v) { curToolStreamed = v; }, get streamed() { return curToolStreamed; } };
   }
 
   function createToolCard(toolName, args) {
@@ -2324,7 +2764,7 @@ window.onerror = function(message, source, lineno, colno, error) {
     } else if (toolName === 'use_skill' && args.id) {
       argDetails = 'Skill: ' + args.id;
     } else if (toolName === 'call_mcp_tool' && args.server) {
-      argDetails = 'Server: ' + args.server + ' | Tool: ' + (args.tool || '') + (args.arguments ? '\n' + args.arguments : '');
+      argDetails = 'Server: ' + args.server + ' | Tool: ' + (args.tool || '') + (args.arguments ? '\n' + (typeof args.arguments === 'string' ? args.arguments : JSON.stringify(args.arguments, null, 2)) : '');
     } else if (toolName === 'ask_clarification') {
       var q = args.questions || args.question || '';
       argDetails = q;
@@ -2332,25 +2772,33 @@ window.onerror = function(message, source, lineno, colno, error) {
       argDetails = 'AI checklist updated.';
     } else if (args.path) {
       argDetails = (toolName === 'list_dir' ? 'Directory: ' : 'File: ') + args.path;
-      if (toolName === 'edit_file' && args.search) {
+      if (toolName === 'edit_file' && typeof args.search === 'string') {
         customHtml = '<div class="diff-container">' +
                        '<pre class="diff-del"><code>' + esc(args.search.split('\n').map(function(l){return '- ' + l;}).join('\n')) + '</code></pre>' +
-                       '<pre class="diff-add"><code>' + esc(args.replace.split('\n').map(function(l){return '+ ' + l;}).join('\n')) + '</code></pre>' +
+                       '<pre class="diff-add"><code>' + esc(String(args.replace || '').split('\n').map(function(l){return '+ ' + l;}).join('\n')) + '</code></pre>' +
                      '</div>';
       } else if (toolName === 'write_file' && args.content) {
         customHtml = '<pre class="tool-write-preview"><code>' + esc(args.content) + '</code></pre>';
       }
-    } else if (toolName === 'grep_search' && args.query) {
-      argDetails = 'Pattern: ' + args.query;
+    } else if (toolName === 'grep_search' && (args.pattern || args.query)) {
+      argDetails = 'Pattern: ' + (args.pattern || args.query) + (args.glob ? ' | Glob: ' + args.glob : '');
+    } else if (toolName === 'task') {
+      argDetails = '[' + (args.subagent_type || '') + '] ' + (args.description || '') + '\n\n' + (args.prompt || '');
+    } else if (toolName === 'glob' && args.pattern) {
+      argDetails = 'Pattern: ' + args.pattern;
     } else {
       argDetails = JSON.stringify(args, null, 2);
     }
 
-    card.innerHTML = 
+    card.dataset.start = String(Date.now());
+    card.innerHTML =
       '<div class="tool-hdr">' +
         '<span class="tool-icon">' + meta.icon + '</span>' +
         '<span class="tool-title">' + meta.title + '</span>' +
+        '<span class="tool-summary">' + esc(getToolSummary(toolName, args || {})) + '</span>' +
+        '<span class="tool-time"></span>' +
         '<span class="tool-status ts-pending" id="t-status">pending</span>' +
+        CHEV_SVG.replace('class="chev"', 'class="tool-chev"') +
       '</div>' +
       '<pre class="tool-args">' + esc(argDetails) + '</pre>' +
       '<div id="t-custom">' + customHtml + '</div>' +
@@ -2358,6 +2806,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         '<span class="tool-approval-msg">⚠️ High-risk tool. Requires approval.</span>' +
         '<div class="tool-btn-container">' +
           '<button class="tool-btn tool-btn-approve" id="btn-approve">Approve</button>' +
+          '<button class="tool-btn tool-btn-always" id="btn-always" title="Approve, and don\'t ask again for this tool in this session">Always allow</button>' +
           '<button class="tool-btn tool-btn-reject" id="btn-reject">Reject</button>' +
         '</div>' +
       '</div>' +
@@ -2366,8 +2815,24 @@ window.onerror = function(message, source, lineno, colno, error) {
         '<pre class="tool-out" id="t-out"></pre>' +
       '</div>';
 
+    card.querySelector('.tool-hdr').onclick = function() { card.classList.toggle('open'); };
     appendToChat(card);
     return card;
+  }
+
+  /** The one argument that identifies a call at a glance, for the row. */
+  function getToolSummary(tool, a) {
+    if (tool === 'execute_command') return a.command || '';
+    if (tool === 'task') return a.description || a.subagent_type || '';
+    if (tool === 'call_mcp_tool') return (a.server || '') + '.' + (a.tool || '');
+    var v = a.path || a.pattern || a.query || a.doctype || a.url || a.id || a.filter || a.page_name || a.name || '';
+    return typeof v === 'string' ? v : JSON.stringify(v);
+  }
+
+  function setToolDuration(card) {
+    card.classList.remove('running');
+    var t = card.querySelector('.tool-time');
+    if (t && card.dataset.start) t.textContent = fmtDur(Date.now() - Number(card.dataset.start));
   }
 
   function md(t){
@@ -2544,7 +3009,14 @@ window.onerror = function(message, source, lineno, colno, error) {
   function esc(t){var d=document.createElement('div');d.textContent=t;return d.innerHTML;}
   function getToolDescription(tool, args) {
     if (!args) return 'Running ' + tool + '...';
-    if (tool === 'grep_search') return 'Searching files for "' + (args.query || '') + '"...';
+    if (tool === 'grep_search') return 'Searching files for "' + (args.pattern || args.query || '') + '"...';
+    if (tool === 'task') return 'Sub-agent (' + (args.subagent_type || '') + '): ' + (args.description || '');
+    if (tool === 'search_knowledge') return 'Searching knowledge base for "' + (args.query || '') + '"...';
+    if (tool === 'list_doctypes') return 'Listing DocTypes' + (args.filter ? ' matching "' + args.filter + '"' : '') + '...';
+    if (tool === 'glob') return 'Finding files: `' + (args.pattern || '') + '`';
+    if (tool === 'multi_edit') return 'Editing: `' + (args.path || '') + '`';
+    if (tool === 'command_output') return 'Reading output of `' + (args.id || '') + '`';
+    if (tool === 'kill_command') return 'Stopping `' + (args.id || '') + '`';
     if (tool === 'execute_command') return 'Running command: `' + (args.command || '') + '`';
     if (tool === 'read_file') return 'Reading: `' + (args.path || '') + '`';
     if (tool === 'write_file') return 'Writing: `' + (args.path || '') + '`';
@@ -2571,34 +3043,48 @@ window.onerror = function(message, source, lineno, colno, error) {
         var label = m.status;
         var badgeClass = 'b-pending';
         if (m.status === 'ready') {
-          label = '🟢 Ready';
+          label = 'Ready';
           badgeClass = 'b-on';
         } else if (m.status === 'no-key') {
-          label = '⚠️ Set API Key';
+          label = 'Set API key';
           badgeClass = 'b-off';
         } else if (m.status === 'init') {
-          label = '⏳ Connecting';
+          label = 'Connecting';
         }
         st.textContent = label;
         st.className = 'badge ' + badgeClass;
         break;
       case'benchStatus':break;
       case 'modelsList':
-        if (m.models && m.models.length > 0) {
+        modelState.loading = false;
+        modelState.error = m.error || '';
+        if (m.models) {
+          modelState.models = m.models;
           modelSelect.innerHTML = '';
           m.models.forEach(function(model) {
             var opt = document.createElement('option');
             opt.value = model;
             opt.textContent = model;
-            if (model === m.activeModel) {
-              opt.selected = true;
-            }
             modelSelect.appendChild(opt);
           });
-          modelSelect.style.display = 'inline-block';
-        } else {
-          modelSelect.style.display = 'none';
         }
+        if (m.fetchedAt) modelState.fetchedAt = m.fetchedAt;
+        if (m.activeModel) {
+          modelState.active = m.activeModel;
+          if (!Array.prototype.some.call(modelSelect.options, function(o) { return o.value === m.activeModel; })) {
+            var cur = document.createElement('option');
+            cur.value = m.activeModel; cur.textContent = m.activeModel;
+            modelSelect.appendChild(cur);
+          }
+          modelSelect.value = m.activeModel;
+        }
+        renderModelPicker();
+        break;
+      case 'effortInfo':
+        effortState.levels = m.levels || [];
+        effortState.recommended = m.recommended || null;
+        effortState.effort = m.effort || null;
+        renderEffort();
         break;
       case 'graphUpdated': renderGraph(m.graph); break;
       case 'agentRouted': showAgentBadge(m); break;
@@ -2649,8 +3135,11 @@ window.onerror = function(message, source, lineno, colno, error) {
           removeThinking();
         } else if (m.state === 'idle') {
           removeThinking();
+          finishRunTimer();
           isSt = false;
           updBtn();
+          renderTodoList(todoState);
+          setTimeout(flushQueue, 150);
         }
         break;
 
@@ -2666,12 +3155,16 @@ window.onerror = function(message, source, lineno, colno, error) {
         showThinking(getToolDescription(m.tool, m.args));
         curToolCard = createToolCard(m.tool, m.args);
         curToolStreamed = false;
+        if (m.callId) toolCards[m.callId] = { card: curToolCard, streamed: false };
         break;
 
-      case 'toolApprovalRequired':
-        if (curToolCard) {
+      case 'toolApprovalRequired': {
+        var cardEntry = resolveToolCard(m);
+        var card = cardEntry.card;
+        if (card) {
+          card.classList.add('open', 'needs-approval');
           if (m.diffHunks) {
-            var customEl = curToolCard.querySelector('#t-custom');
+            var customEl = card.querySelector('#t-custom');
             if (customEl) {
               var hunkHtml = m.diffHunks.map(function(h) {
                 var cls = h.added ? 'diff-add' : h.removed ? 'diff-del' : '';
@@ -2683,24 +3176,34 @@ window.onerror = function(message, source, lineno, colno, error) {
               customEl.innerHTML = newFileBadge + '<div class="diff-container">' + hunkHtml + '</div>';
             }
           }
-          var appDiv = curToolCard.querySelector('#t-approval');
+          var appDiv = card.querySelector('#t-approval');
           appDiv.style.display = 'flex';
 
-          var appBtn = curToolCard.querySelector('#btn-approve');
-          var rejBtn = curToolCard.querySelector('#btn-reject');
+          var appBtn = card.querySelector('#btn-approve');
+          var rejBtn = card.querySelector('#btn-reject');
 
           appBtn.onclick = function() {
             appDiv.style.display = 'none';
-            var toolStatusEl = curToolCard.querySelector('#t-status');
+            card.classList.remove('needs-approval', 'open');
+            var toolStatusEl = card.querySelector('#t-status');
             if (toolStatusEl) {
               toolStatusEl.className = 'tool-status ts-running';
               toolStatusEl.textContent = 'waiting...';
             }
             vs.postMessage({ type: 'toolApproved' });
           };
+          var alwaysBtn = card.querySelector('#btn-always');
+          if (alwaysBtn) alwaysBtn.onclick = function() {
+            appDiv.style.display = 'none';
+            card.classList.remove('needs-approval', 'open');
+            var toolStatusEl = card.querySelector('#t-status');
+            if (toolStatusEl) { toolStatusEl.className = 'tool-status ts-running'; toolStatusEl.textContent = 'waiting...'; }
+            vs.postMessage({ type: 'toolApproved', always: true, tool: m.tool });
+          };
           rejBtn.onclick = function() {
             appDiv.style.display = 'none';
-            var toolStatusEl = curToolCard.querySelector('#t-status');
+            card.classList.remove('needs-approval', 'open');
+            var toolStatusEl = card.querySelector('#t-status');
             if (toolStatusEl) {
               toolStatusEl.className = 'tool-status ts-rejected';
               toolStatusEl.textContent = 'rejected';
@@ -2709,25 +3212,32 @@ window.onerror = function(message, source, lineno, colno, error) {
           };
         }
         break;
-
-      case 'toolExecuting':
-        if (curToolCard) {
-          var toolStatusEl = curToolCard.querySelector('#t-status');
+      }
+      case 'toolExecuting': {
+        var cardEntry = resolveToolCard(m);
+        var card = cardEntry.card;
+        if (card) {
+          // Time the execution itself, not the wait for approval.
+          card.dataset.start = String(Date.now());
+          card.classList.add('running');
+          var toolStatusEl = card.querySelector('#t-status');
           if (toolStatusEl) {
             toolStatusEl.className = 'tool-status ts-running';
             toolStatusEl.textContent = 'running';
           }
-          var storedArgs = curToolCard.getAttribute('data-args');
+          var storedArgs = card.getAttribute('data-args');
           var parsedArgs = storedArgs ? JSON.parse(storedArgs) : {};
           showThinking(getToolDescription(m.tool, parsedArgs));
 
           // execute_command streams live below — pre-open the output pane so
           // the first chunk lands somewhere visible instead of behind a toggle.
           if (m.tool === 'execute_command') {
-            var liveOutCont = curToolCard.querySelector('#t-out-container');
-            var liveOutPre = curToolCard.querySelector('#t-out');
-            var liveToggle = curToolCard.querySelector('#btn-toggle');
+            var liveOutCont = card.querySelector('#t-out-container');
+            var liveOutPre = card.querySelector('#t-out');
+            var liveToggle = card.querySelector('#btn-toggle');
             liveOutCont.style.display = 'block';
+            liveOutCont.setAttribute('data-has-output', '1');
+            card.classList.add('open');
             liveOutPre.textContent = '';
             liveOutPre.classList.add('show');
             liveToggle.textContent = 'Hide Details';
@@ -2738,20 +3248,27 @@ window.onerror = function(message, source, lineno, colno, error) {
           }
         }
         break;
-
-      case 'toolOutputChunk':
-        if (curToolCard) {
-          curToolStreamed = true;
-          var chunkOutPre = curToolCard.querySelector('#t-out');
+      }
+      case 'toolOutputChunk': {
+        var cardEntry = resolveToolCard(m);
+        var card = cardEntry.card;
+        if (card) {
+          cardEntry.streamed = true;
+          var chunkOutPre = card.querySelector('#t-out');
           chunkOutPre.textContent += m.chunk;
           chunkOutPre.scrollTop = chunkOutPre.scrollHeight;
           stickScroll();
         }
         break;
-
-      case 'toolFinished':
-        if (curToolCard) {
-          var toolStatusEl = curToolCard.querySelector('#t-status');
+      }
+      case 'toolFinished': {
+        var cardEntry = resolveToolCard(m);
+        var card = cardEntry.card;
+        if (card) {
+          setToolDuration(card);
+          // Live command output collapses once it succeeds; failures stay open.
+          if (m.tool === 'execute_command' && m.success) card.classList.remove('open');
+          var toolStatusEl = card.querySelector('#t-status');
           if (toolStatusEl) {
             toolStatusEl.className = 'tool-status ' + (m.success ? 'ts-success' : 'ts-failed');
             toolStatusEl.textContent = m.success ? 'success' : 'failed';
@@ -2760,12 +3277,13 @@ window.onerror = function(message, source, lineno, colno, error) {
           // Already streamed live above — the final m.output is the same
           // content re-wrapped (STDOUT:/STDERR: + truncation), so overwriting
           // here would just replace the live transcript with a lossier copy.
-          if (m.output && !curToolStreamed) {
-            var outCont = curToolCard.querySelector('#t-out-container');
-            var outPre = curToolCard.querySelector('#t-out');
-            var toggle = curToolCard.querySelector('#btn-toggle');
+          if (m.output && !cardEntry.streamed) {
+            var outCont = card.querySelector('#t-out-container');
+            var outPre = card.querySelector('#t-out');
+            var toggle = card.querySelector('#btn-toggle');
 
             outCont.style.display = 'block';
+            outCont.setAttribute('data-has-output', '1');
             outPre.textContent = m.output;
 
             toggle.onclick = function() {
@@ -2773,10 +3291,11 @@ window.onerror = function(message, source, lineno, colno, error) {
               toggle.textContent = show ? 'Hide Details' : 'Show Details';
             };
           }
-          curToolCard = null;
-          curToolStreamed = false;
+          if (m.callId) delete toolCards[m.callId];
+          if (curToolCard === card) { curToolCard = null; curToolStreamed = false; }
         }
         break;
+      }
       case 'insertCodeMention':
         if (m.mention) {
           var relPath = m.mention.relativePath;
@@ -2916,7 +3435,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         }
         break;
       case 'todoListUpdated':
-        renderTodoList(m.tasks);
+        renderTodoList(m);
         break;
     }
   });
@@ -2932,39 +3451,64 @@ window.onerror = function(message, source, lineno, colno, error) {
     gpToggle.textContent = isColl ? 'Collapse' : 'Expand';
   };
 
-  var todoPanel = document.getElementById('todo-panel');
-  var todoList = document.getElementById('todo-list');
-  var todoToggle = document.getElementById('btn-toggle-todo');
+  // ── Task list dock ────────────────────────────────────────────────────
+  var todoDock = document.getElementById('todo-dock');
+  var todoItemsEl = document.getElementById('todo-items');
+  var todoState = { items: [], stale: false };
+  var todoCollapsed = false;
 
-  todoToggle.onclick = function() {
-    var isColl = todoList.style.display === 'none';
-    todoList.style.display = isColl ? 'flex' : 'none';
-    todoToggle.textContent = isColl ? 'Collapse' : 'Expand';
+  document.getElementById('todo-head').onclick = function() {
+    todoCollapsed = !todoCollapsed;
+    renderTodoList(todoState);
+  };
+  document.getElementById('todo-clear').onclick = function() {
+    vs.postMessage({ type: 'clearTodos' });
   };
 
-  function renderTodoList(tasks) {
-    if (!tasks || tasks.length === 0) {
-      todoPanel.style.display = 'none';
-      return;
-    }
-    todoPanel.style.display = 'flex';
-    todoList.innerHTML = '';
+  /** Progress ring: completed (and cancelled) share of the list. */
+  function todoRing(done, total) {
+    var r = 7, c = 2 * Math.PI * r, frac = total ? done / total : 0;
+    return '<svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="' + r + '" fill="none" stroke="var(--cl-border)" stroke-width="2"/>' +
+      '<circle cx="9" cy="9" r="' + r + '" fill="none" stroke="' + (frac === 1 ? 'var(--cl-ok)' : 'var(--cl-accent)') + '" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-dasharray="' + (c * frac).toFixed(2) + ' ' + c.toFixed(2) + '" transform="rotate(-90 9 9)"/></svg>';
+  }
 
-    tasks.forEach(function(task) {
-      var item = document.createElement('div');
-      item.className = 'todo-item ' + (task.status || 'pending');
-      
-      var icon = '○';
-      if (task.status === 'running') icon = '➔';
-      else if (task.status === 'completed') icon = '✓';
-      else if (task.status === 'failed') icon = '✗';
+  var TODO_ICON = {
+    completed: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+    in_progress: '<span class="todo-dot"></span>',
+    pending: '<span class="todo-circle"></span>',
+    cancelled: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 12h12"/></svg>'
+  };
 
-      item.innerHTML = 
-        '<span class="todo-icon">' + icon + '</span>' +
-        '<span class="todo-label">' + esc(task.label) + '</span>';
-      
-      todoList.appendChild(item);
-    });
+  function renderTodoList(state) {
+    todoState = { items: (state && state.items) || [], stale: !!(state && state.stale) };
+    var items = todoState.items;
+    var allDone = items.length > 0 && items.every(function(t) { return t.status === 'completed' || t.status === 'cancelled'; });
+    // A finished list stays visible during the run that finished it, then gets out of the way.
+    todoDock.classList.toggle('show', items.length > 0 && !(allDone && !isSt));
+    if (!items.length) return;
+
+    var done = items.filter(function(t) { return t.status === 'completed' || t.status === 'cancelled'; }).length;
+    var current = items.find(function(t) { return t.status === 'in_progress'; });
+    document.getElementById('todo-progress').innerHTML = todoRing(done, items.length);
+    document.getElementById('todo-current').textContent = allDone ? 'All tasks done'
+      : current ? (current.activeForm || current.content)
+      : todoState.stale ? 'Unfinished tasks' : 'Tasks';
+    document.getElementById('todo-count').textContent = done + ' of ' + items.length;
+    todoDock.classList.toggle('collapsed', todoCollapsed);
+    document.getElementById('todo-head').setAttribute('aria-expanded', String(!todoCollapsed));
+
+    todoItemsEl.innerHTML = items.map(function(t) {
+      return '<li class="todo-item ' + t.status + '"><span class="todo-mark">' + (TODO_ICON[t.status] || TODO_ICON.pending) + '</span>' +
+        '<span class="todo-text">' + esc(t.content) + '</span></li>';
+    }).join('');
+
+    var open = items.length - done;
+    document.getElementById('todo-stale').classList.toggle('show', todoState.stale && open > 0 && !isSt);
+    document.getElementById('todo-stale-text').textContent = 'Run ended with ' + open + ' open — the next message picks them up.';
+
+    // The in-progress task's present-tense form doubles as the status-line phase.
+    if (current && isSt) updateThinkPhase(current.activeForm || current.content);
   }
 
   // --- Shared layered node-graph renderer ---------------------------------

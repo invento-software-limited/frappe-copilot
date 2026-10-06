@@ -24,6 +24,17 @@ export interface LLMProvider {
   /** Optional: Reload provider configuration from workspace settings. */
   refreshConfig?(): void;
 
+  /** Optional: the model id requests go to by default — used to size the context window. */
+  getModelId?(): string;
+
+  /** Optional: true when the provider clears old tool results server-side,
+   *  so the caller must not trim history itself. */
+  managesContextServerSide?(): boolean;
+
+  /** Optional: true when chatStream honors ChatOptions.tools and yields
+   *  structured toolCalls. Providers without it get the XML tool protocol. */
+  supportsNativeTools?(): boolean;
+
   /** Optional: Report which credential type is active — lets the UI show
    *  whether requests are billed against an API key or a Claude.ai subscription. */
   getAuthMode?(): Promise<'api-key' | 'oauth' | 'none'>;

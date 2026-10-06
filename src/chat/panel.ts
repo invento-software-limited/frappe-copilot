@@ -5,13 +5,20 @@ import * as os from 'os';
 import { LLMProvider } from '../providers/interface';
 import { runClaudeOAuthFlow } from '../providers/anthropicOAuth';
 import { SessionManager } from '../session/manager';
-import { BenchEnvironment, Session, Message, CheckpointEntry, ImageAttachment } from '../types';
+import { BenchEnvironment, Session, Message, CheckpointEntry, ImageAttachment, ChatOptions, ChatResponse, ToolCall, ToolResultBlock, ThinkingBlock, ToolSpec } from '../types';
 import { readIntakeFile } from '../intake/fileReader';
 import { splitContent, splitPagesIntoChunks, MAX_CHUNK_CHARS } from '../intake/splitter';
 import { extractContent, renderMergedUnderstandingAsMarkdown } from '../intake/extractor';
 import { ToolExecutor } from '../agents/toolExecutor';
 import { buildSystemPrompt } from '../agents/prompts';
-import { AgentDefinition, ToolName } from '../agents/types';
+import { AgentDefinition, ToolName, READ_ONLY_TOOLS } from '../agents/types';
+import { buildToolSpecs } from '../agents/tools/schemas';
+import { ContextTools, schemaSummary } from '../agents/tools/contextTools';
+import { buildSubagent, isParallelSafeTask, SUBAGENT_TYPES } from '../agents/subagents';
+import { SkillRouter, SkillPick, RunSkillState } from '../agents/skillRouter';
+import { TodoTracker } from '../agents/todos';
+import { contextWindowFor, pruneRunHistory } from '../session/contextBudget';
+import { capsFor, clampEffort, isEffortLevel, EffortLevel, EFFORT_LEVELS } from '../providers/modelCaps';
 import { AGENTS, GENERAL_AGENT } from '../agents/registry';
 import { getApprovalMode, isAutoApprove, ApprovalMode } from '../agents/approvalMode';
 import { ROUTER_CONTEXT_TURNS } from '../agents/router';
@@ -76,7 +83,10 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 /** Rough, deliberately conservative single default — this codebase has no
  *  per-model context-window registry, and building one is out of scope for a
  *  ballpark usage indicator. */
-const TOKEN_BUDGET_ESTIMATE = 180000;
+/** Offer compaction once history passes this share of the context window. */
+const OFFER_COMPACT_AT = 0.5;
+/** Compact automatically past this share. */
+const AUTO_COMPACT_AT = 0.8;
 
 interface RunAgentLoopOptions {
   /** Run bench migrate/tests after this agent finishes, self-correcting on failure. */
@@ -120,6 +130,10 @@ export class ChatPanel implements vscode.WebviewViewProvider {
   /** Auto-selected skill content for the run in flight — computed once per run
    *  so the system prompt stays cache-stable across its steps. */
   private activeSkillContext = '';
+  private skillRouter: SkillRouter | null = null;
+  /** Skills loaded or hinted during the current run; preloaded = auto-loaded at its start. */
+  private runSkills = new RunSkillState();
+  private preloadedSkills: ReadonlySet<string> = new Set();
   private schemaMap: { doctypes: string[], apps: string[] } | null = null;
   private pendingApproval: { resolve: (approved: boolean) => void } | null = null;
   /** Gates a multi-stage plan before ANY of its stages start — kept separate
@@ -132,10 +146,25 @@ export class ChatPanel implements vscode.WebviewViewProvider {
   private pendingClarification: { resolve: (answers: string) => void } | null = null;
   private pendingOAuthResolver: ((code: string) => void) | null = null;
   private activeModel: string = '';
-  private todoList: any[] = [];
+  /** The agent's task list for the active session (persisted, carried across runs). */
+  private todos = new TodoTracker();
+  private todosSessionId: string | null = null;
+  /** Unfinished list from an earlier run, injected into this run's context. */
+  private activeTodoContext = '';
   private abortController: AbortController | null = null;
   private isRunningAgent = false;
   private aborted = false;
+  /** Set when the model rejects native tool calling — falls back to the XML protocol. */
+  private nativeToolsDisabled = false;
+  private contextTools = new ContextTools(() => this.vectorStore, () => this.schemaMap, () => this.refreshSchema());
+  /** Prompt tokens of the most recent model call (real usage when reported). */
+  private lastPromptTokens = 0;
+  private ragCache: { query: string; text: string } | null = null;
+  private compacting = false;
+  private streamSeq = 0;
+  /** Tools the user chose "always allow" for in this session. */
+  private alwaysAllowed = new Set<string>();
+  private modelCache: { provider: string; models: string[]; fetchedAt: number } | null = null;
 
   constructor(
     private readonly extensionPath: string,
@@ -156,6 +185,7 @@ export class ChatPanel implements vscode.WebviewViewProvider {
       // library too (see VectorStore's 'skill' source type).
       this.skillsStore = new SkillsStore(fp, path.join(extensionPath, 'assets', 'skills'));
       this.skillsStore.migrateLegacyMemoryIfNeeded();
+      this.skillRouter = new SkillRouter(this.skillsStore);
       this.vectorStore = new VectorStore(fp, extensionPath, provider, root, this.skillsStore);
       this.vectorStoreWatchers = this.vectorStore.watch();
       this.introspectSchema(fp);
@@ -263,8 +293,7 @@ export class ChatPanel implements vscode.WebviewViewProvider {
     this.say('insertCodeMention', { mention });
   }
   loadSession(session: Session): void {
-    this.todoList = [];
-    this.say('todoListUpdated', { tasks: [] });
+    this.bindTodos(session);
     const messages = this.sessionManager.readMessages(session.id);
 
     // Flag each user message whose promptId produced a revertible checkpoint
@@ -318,15 +347,29 @@ export class ChatPanel implements vscode.WebviewViewProvider {
    *  a system-prompt section. Each one is announced in the chat so it is obvious
    *  which guidance the answer was written against. Returns '' when nothing
    *  scores highly enough — the common case for chitchat and short follow-ups. */
-  private buildAutoSkillContext(userMessage: string): string {
-    if (!this.skillsStore) return '';
+  /** Points the todo tracker at a session's saved list. */
+  private bindTodos(session: Session): void {
+    if (this.todosSessionId === session.id) return;
+    const fp = this.getFrappeCopilotPath();
+    this.todos.load(fp ? path.join(fp, 'sessions', session.id) : null);
+    this.todosSessionId = session.id;
+    this.sendTodos();
+  }
 
-    let picked: { id: string; name: string; content: string }[] = [];
+  private sendTodos(): void {
+    this.say('todoListUpdated', this.todos.snapshot());
+  }
+
+  /** Preloads the skills (and their relevant reference files) this request
+   *  needs, and resets the run's skill tracking for mid-run hints. */
+  private buildAutoSkillContext(userMessage: string): string {
+    this.runSkills = new RunSkillState();
+    this.preloadedSkills = new Set();
+    if (!this.skillRouter) return '';
+
+    let picked: SkillPick[] = [];
     try {
-      picked = this.skillsStore.suggestSkills(userMessage)
-        .map(meta => ({ meta, content: this.skillsStore!.readSkill(meta.id) }))
-        .filter(s => !!s.content && !s.content!.startsWith('Error:'))
-        .map(s => ({ id: s.meta.id, name: s.meta.name, content: s.content! }));
+      picked = this.skillRouter.selectForRequest(userMessage);
     } catch (e) {
       console.error('Auto skill selection failed:', e);
       return '';
@@ -334,11 +377,13 @@ export class ChatPanel implements vscode.WebviewViewProvider {
     if (picked.length === 0) return '';
 
     for (const s of picked) {
-      this.say('skillEvent', { kind: 'loaded', id: s.id, name: s.name, auto: true });
+      this.runSkills.loaded.add(s.id);
+      this.say('skillEvent', { kind: 'loaded', id: s.id, name: s.name, auto: true, reason: s.reason });
     }
+    this.preloadedSkills = new Set(this.runSkills.loaded);
 
-    return `\n\n### Auto-Loaded Skills\nThese were selected automatically as relevant to the request — treat them as authoritative for the topics they cover, and do not call use_skill for them again:\n\n` +
-      picked.map(s => `--- [Skill: ${s.id}] ---\n${s.content}`).join('\n\n');
+    return `\n\n### Auto-Loaded Skills\nSelected for this request — treat them as authoritative for the topics they cover, and don't load them again with use_skill:\n\n` +
+      picked.map(s => `--- [${s.id.includes('/') ? 'Skill reference' : 'Skill'}: ${s.id}] (${s.reason}) ---\n${s.content}`).join('\n\n');
   }
 
   private getWebviewContent(): string {
@@ -360,17 +405,12 @@ export class ChatPanel implements vscode.WebviewViewProvider {
         this.say('status', await this.hasApiKey() ? 'ready' : 'no-key');
         this.say('benchStatus', this.benchEnv?.type || 'unknown');
         
-        try {
-          const models = this.provider.getModels ? await this.provider.getModels() : [];
-          this.say('modelsList', { models, activeModel: this.activeModel || models[0] });
-        } catch (e) {
-          console.error('Failed to get models list:', e);
-        }
+        await this.sendModels(false);
 
         if (this.sessionManager.activeSession) {
           this.loadSession(this.sessionManager.activeSession);
         }
-        this.say('todoListUpdated', { tasks: this.todoList });
+        this.sendTodos();
         this.notifySkillsChanged();
         break;
       case 'getSkillContent': {
@@ -392,8 +432,15 @@ export class ChatPanel implements vscode.WebviewViewProvider {
         this.aborted = true;
         this.abortController?.abort();
         this.isRunningAgent = false;
+        // A run parked on an approval or question would otherwise wait forever.
+        this.pendingApproval?.resolve(false);
+        this.pendingApproval = null;
+        this.pendingClarification?.resolve('(The user cancelled the run before answering.)');
+        this.pendingClarification = null;
+        this.toolExecutor.killRunningCommands();
         break;
       case 'toolApproved':
+        if (msg.always && typeof msg.tool === 'string') this.alwaysAllowed.add(msg.tool);
         if (this.pendingApproval) {
           this.say('agentState', { state: 'running' });
           this.pendingApproval.resolve(true);
@@ -457,6 +504,7 @@ export class ChatPanel implements vscode.WebviewViewProvider {
         }
         break;
       case 'newSession':
+        this.alwaysAllowed.clear();
         vscode.commands.executeCommand('frappe-copilot.newSession');
         break;
       case 'openHistory':
@@ -477,8 +525,23 @@ export class ChatPanel implements vscode.WebviewViewProvider {
           this.pendingClarification = null;
         }
         break;
+      case 'setEffort': {
+        const level = isEffortLevel(msg.effort) ? msg.effort : '';
+        await vscode.workspace.getConfiguration('frappe-copilot').update('effort', level, vscode.ConfigurationTarget.Global);
+        this.sendEffort();
+        break;
+      }
+      case 'clearTodos':
+        this.todos.clear();
+        this.sendTodos();
+        break;
+      case 'refreshModels':
+        await this.sendModels(true);
+        break;
       case 'selectModel':
         this.activeModel = msg.model;
+        this.sendEffort();
+        this.nativeToolsDisabled = false;
         break;
       case 'setApprovalMode': {
         const mode: ApprovalMode = msg.mode === 'auto' ? 'auto' : 'ask';
@@ -589,6 +652,7 @@ export class ChatPanel implements vscode.WebviewViewProvider {
           const section = activeProviderId === 'openai' ? 'frappe-copilot.openai' : activeProviderId === 'anthropic' ? 'frappe-copilot.anthropic' : 'frappe-copilot.opencodeZen';
           await vscode.workspace.getConfiguration(section).update('endpoint', msg.endpoint.trim(), vscode.ConfigurationTarget.Global);
           (this.provider as any).refreshConfig?.();
+          this.nativeToolsDisabled = false;
           this.say('apiKeyStatus', { ok: true, msg: 'Endpoint saved.' });
         }
         break;
@@ -596,6 +660,7 @@ export class ChatPanel implements vscode.WebviewViewProvider {
         if (msg.provider) {
           await vscode.workspace.getConfiguration('frappe-copilot').update('provider', msg.provider, vscode.ConfigurationTarget.Global);
           (this.provider as any).refreshConfig?.();
+          this.nativeToolsDisabled = false;
           const hasKey = await (this.provider as any).hasApiKey?.();
           const endpoint = this.endpointForProvider(msg.provider);
           this.say('settingsLoaded', {
@@ -604,10 +669,8 @@ export class ChatPanel implements vscode.WebviewViewProvider {
             provider: msg.provider,
             authMode: await this.getAuthModeSafe()
           });
-          try {
-            const models = this.provider.getModels ? await this.provider.getModels() : [];
-            this.say('modelsList', { models, activeModel: models[0] });
-          } catch {}
+          this.activeModel = '';
+          await this.sendModels(true);
           this.say('status', hasKey ? 'ready' : 'no-key');
         }
         break;
@@ -992,13 +1055,29 @@ export class ChatPanel implements vscode.WebviewViewProvider {
   private reportSessionSize(session: Session): void {
     const effective = this.sessionManager.buildEffectiveHistory(session.id);
     const estimatedTokens = estimateMessagesTokens(effective);
-    this.say('tokenUsage', { estimatedTokens, budget: TOKEN_BUDGET_ESTIMATE });
+    const window = contextWindowFor(this.activeModel || this.provider.getModelId?.() || '');
+    this.say('tokenUsage', { estimatedTokens, budget: window });
 
-    const autoOffer = vscode.workspace.getConfiguration('frappe-copilot').get<boolean>('compaction.autoOffer', true);
-    const thresholdTokens = vscode.workspace.getConfiguration('frappe-copilot').get<number>('compaction.thresholdTokens', DEFAULT_COMPACTION_THRESHOLD_TOKENS);
+    // History alone past this share of the window leaves too little room for
+    // the system prompt and a run's tool output — compact without asking.
+    if (estimatedTokens > window * AUTO_COMPACT_AT && !this.compacting) {
+      this.chat('system', `🗜️ Conversation is using ${Math.round(estimatedTokens / window * 100)}% of the context window — compacting automatically.`);
+      void this.runManualCompaction(session);
+      return;
+    }
+    const cfg = vscode.workspace.getConfiguration('frappe-copilot');
+    const autoOffer = cfg.get<boolean>('compaction.autoOffer', true);
+    const thresholdTokens = this.compactionThreshold(window);
     if (autoOffer && estimatedTokens > thresholdTokens) {
       this.say('compactionOffered', { estimatedTokens, thresholdTokens });
     }
+  }
+
+  /** The user's explicit thresholdTokens setting, else a share of the model's window. */
+  private compactionThreshold(window: number): number {
+    const inspected = vscode.workspace.getConfiguration('frappe-copilot').inspect<number>('compaction.thresholdTokens');
+    const explicit = inspected?.workspaceFolderValue ?? inspected?.workspaceValue ?? inspected?.globalValue;
+    return explicit ?? Math.round(window * OFFER_COMPACT_AT);
   }
 
   /** "Summarize and replace": one non-streaming LLM call summarizes the full
@@ -1007,14 +1086,17 @@ export class ChatPanel implements vscode.WebviewViewProvider {
    *  model going forward) shrinks. */
   private async runManualCompaction(session: Session): Promise<void> {
     const allMessages = this.sessionManager.readMessages(session.id);
-    if (allMessages.length === 0) return;
+    if (allMessages.length === 0 || this.compacting) return;
+    this.compacting = true;
 
     this.chat('system', '🗜️ Compacting conversation...');
     try {
-      const { system, user } = buildCompactionPrompt(allMessages);
+      // ~4 chars/token; leave room for the summary itself.
+      const window = contextWindowFor(this.activeModel || this.provider.getModelId?.() || '');
+      const { system, user } = buildCompactionPrompt(allMessages, Math.floor(window * 0.6 * 4));
       const response = await this.provider.chat(
         [{ role: 'system', content: system }, { role: 'user', content: user }],
-        { maxTokens: 1500, temperature: 0 }
+        { maxTokens: 4000, temperature: 0 }
       );
       const summary = response.content.trim();
       if (!summary) {
@@ -1032,6 +1114,8 @@ export class ChatPanel implements vscode.WebviewViewProvider {
       this.reportSessionSize(session);
     } catch (e: any) {
       this.chat('error', `Compaction failed: ${e.message || String(e)}`);
+    } finally {
+      this.compacting = false;
     }
   }
 
@@ -1208,6 +1292,10 @@ export class ChatPanel implements vscode.WebviewViewProvider {
     // the run's steps, so the prompt cache still hits — and it saves the
     // round-trip the model would otherwise spend calling use_skill itself.
     this.activeSkillContext = this.buildAutoSkillContext(userMessage);
+    this.bindTodos(session);
+    this.activeTodoContext = this.todos.carryOver();
+    this.todos.beginRun();
+    this.sendTodos();
 
     while (!done) {
       if (this.aborted) {
@@ -1222,8 +1310,18 @@ export class ChatPanel implements vscode.WebviewViewProvider {
         lastAssistantText = stepResult.assistantText;
       }
       done = stepResult.done;
+      // Finishing with open todos: send the agent back once to reconcile them.
+      const nudge = done && !this.aborted && agent.allowedTools.includes('update_todo_list') ? this.todos.endOfRunNudge() : null;
+      if (nudge) {
+        localHistory.push({ role: 'user', content: nudge });
+        done = false;
+        continue;
+      }
       if (stepResult.stopLoop) break;
     }
+    // Whatever is still open survives into the next run instead of lingering forever.
+    this.todos.markInterrupted();
+    this.sendTodos();
 
     let verification: VerificationOutcome | null = null;
     if (opts.verify && done && touchedFiles.length > 0) {
@@ -1324,33 +1422,16 @@ export class ChatPanel implements vscode.WebviewViewProvider {
     stepLabel: string,
     loopState: { malformedCount: number; streamErrorCount: number; truncatedCount: number }
   ): Promise<AgentStepResult> {
-    let ragContext = '';
-    if (this.vectorStore) {
-      try {
-        const results = await this.vectorStore.search(userMessage, 6);
-        if (results.length > 0) {
-          ragContext = `\n\n### Retrieved Knowledge Base Context\nRetrieved from framework docs, this workspace's own code, your notes, skills, and other agents' memory — use it to guide your implementation, ensuring you adhere to correct APIs and this project's own existing patterns:\n\n` +
-                       results.map(r => `--- [Source: ${r.source}] ---\n${r.text}`).join('\n\n');
-        }
-      } catch (e) {
-        console.error('Failed to run vector search:', e);
-      }
-    }
-
-    let schemaContext = '';
-    if (this.schemaMap) {
-      schemaContext = `\n\n### Active Workspace Schema Directory\nThe active site has the following properties:\n` +
-                      `- Installed Apps: ${this.schemaMap.apps.join(', ')}\n` +
-                      `- Active DocTypes: ${this.schemaMap.doctypes.join(', ')}\n` +
-                      `Verify if DocTypes or apps exist in this directory before proposing references or creating them.`;
-    }
+    const native = this.useNativeTools();
+    // Native-tool models pull knowledge on demand (search_knowledge); XML-mode
+    // models are usually weaker at that, so they still get it injected.
+    const ragContext = native ? '' : await this.injectedKnowledge(userMessage);
+    const schemaContext = schemaSummary(this.schemaMap);
 
     let skillsCatalog = '';
-    if (this.skillsStore) {
-      const catalog = this.skillsStore.buildCatalog();
-      if (catalog) {
-        skillsCatalog = `\n\n### Available Skills\nCall 'use_skill' with an id below to load its full content when relevant:\n\n${catalog}`;
-      }
+    const catalog = this.skillRouter?.buildCatalog(this.preloadedSkills);
+    if (catalog) {
+      skillsCatalog = `\n\n### Available Skills\nEach line says when the skill applies. Before starting work of a kind listed here, load the matching skill with 'use_skill' (unless it is already loaded below); a skill may list reference files — load only the ones your task needs:\n\n${catalog}`;
     }
 
     let mcpCatalog = '';
@@ -1371,8 +1452,8 @@ export class ChatPanel implements vscode.WebviewViewProvider {
     // kept as two pieces so a provider that supports a cacheable-prefix
     // split (see Message.staticPrefixLength) doesn't lose its cache hit on
     // the big static part just because the dynamic part changed this turn.
-    const staticSystemPart = buildSystemPrompt(agent);
-    const dynamicSystemPart = ragContext + schemaContext + skillsCatalog + mcpCatalog + crossAgentContext + this.activeSkillContext;
+    const staticSystemPart = buildSystemPrompt(agent, native);
+    const dynamicSystemPart = ragContext + schemaContext + skillsCatalog + mcpCatalog + crossAgentContext + this.activeSkillContext + this.activeTodoContext;
 
     const messages = this.hydrateImages([
       {
@@ -1386,15 +1467,22 @@ export class ChatPanel implements vscode.WebviewViewProvider {
 
     this.say('agentState', { state: 'running', phase: stepLabel === '1' ? 'Analyzing request...' : 'Continuing reasoning...' });
 
-    let fullContent = '';
-    let fullReasoning = '';
-    let truncated = false;
+    let streamed: StreamResult;
     try {
-      const streamed = await this.stream(messages, runId);
-      fullContent = streamed.content;
-      fullReasoning = streamed.reasoning;
-      truncated = streamed.truncated;
+      streamed = await this.stream(messages, runId, native ? buildToolSpecs(agent.allowedTools) : undefined, this.effortFor(agent));
     } catch (e: any) {
+      if (native && looksLikeToolsUnsupported(e)) {
+        // Some OpenAI-compatible models reject the `tools` parameter outright —
+        // drop to the XML protocol for the rest of this session and retry.
+        this.nativeToolsDisabled = true;
+        this.chat('system', '⚠️ This model rejected native tool calling; switching to the text-based tool protocol.');
+        return { done: false, assistantText: '', stopLoop: false };
+      }
+      if (isPermanentError(e)) {
+        // Bad model, auth, or malformed request — retrying can't fix these.
+        this.chat('error', e.message || String(e));
+        return { done: false, assistantText: '', stopLoop: true };
+      }
       loopState.streamErrorCount++;
       if (loopState.streamErrorCount > MAX_CONSECUTIVE_STREAM_ERRORS) {
         this.chat('error', `LLM Stream error (gave up after ${loopState.streamErrorCount} consecutive failures): ${e.message || String(e)}`);
@@ -1405,297 +1493,357 @@ export class ChatPanel implements vscode.WebviewViewProvider {
       return { done: false, assistantText: '', stopLoop: false };
     }
     loopState.streamErrorCount = 0;
+    this.trackContextUsage(streamed, messages, localHistory);
+    const fullContent = streamed.content;
+    const fullReasoning = streamed.reasoning;
+    const truncated = streamed.truncated;
 
-    // Tool calls normally arrive in the visible reply, but with extended
-    // thinking enabled the model sometimes emits the entire <tool_call> block
-    // inside its thinking stream instead. That text never reached the parser
-    // (stream() used to discard reasoning), so the step parsed as zero calls,
-    // the run ended as "done" mid-task, and the user had to type "continue" to
-    // get an already-decided tool call to actually run. Recover it here.
-    let toolCalls = this.parseToolCalls(fullContent);
-    let transcriptText = fullContent;
-    if (toolCalls.length === 0 && fullReasoning.trim()) {
-      const recovered = this.parseToolCalls(fullReasoning);
-      if (recovered.length > 0) {
-        toolCalls = recovered;
-        // Fold the recovered calls into the assistant turn so the transcript
-        // still shows the call that the tool results below it answer to.
-        transcriptText = [fullContent.trim(), ...recovered.map(c => c.raw)]
-          .filter(Boolean)
-          .join('\n\n');
-      }
-    }
-
-    if (transcriptText.trim()) {
-      localHistory.push({ role: 'assistant', content: transcriptText });
+    const nativeCalls = streamed.toolCalls || [];
+    let toolCalls: PendingToolCall[];
+    if (nativeCalls.length > 0) {
+      toolCalls = nativeCalls.map(c => ({ callId: c.id, name: c.name, args: c.input || {} }));
+      localHistory.push({
+        role: 'assistant',
+        content: fullContent,
+        toolCalls: nativeCalls,
+        thinkingBlocks: streamed.thinkingBlocks,
+      });
+    } else {
+      toolCalls = this.extractXmlToolCalls(fullContent, fullReasoning, localHistory, `${runId}-${stepLabel}`);
     }
 
     if (toolCalls.length === 0) {
-      // A response can get cut off by the provider's output-length limit mid
-      // tool-call (e.g. while streaming a large write_file's <content>). The
-      // regex parser needs a matching closing tag, so a truncated call parses
-      // as zero calls — without this check that read as "the agent is done"
-      // and silently dropped the in-progress work, requiring the user to type
-      // "continue" to resume. Detect the dangling opening tag and loop again
-      // instead of ending the run.
-      // Checked across reply + thinking, since a call can be cut off in either.
-      const emitted = `${fullContent}\n${fullReasoning}`;
-      const openCount = (emitted.match(/<tool_call\s+name="/g) || []).length;
-      const closeCount = (emitted.match(/<\/tool_call>/g) || []).length;
-      if (openCount > closeCount) {
-        localHistory.push({
-          role: 'user',
-          content: 'Your previous response was cut off by the output length limit before finishing, so no tool call was executed. Continue and re-send that tool call in full.'
-        });
-        return { done: false, assistantText: fullContent, stopLoop: false };
-      }
-
-      // The provider can also cut a turn off mid-*thinking* or mid-*prose*
-      // reply — no dangling tool-call tag for the check above to catch, since
-      // there was no tool call in progress at all. Without this, that
-      // half-finished text (see ChatResponse.truncated) reads as a genuine,
-      // complete answer and the run ends right there — the exact "it just
-      // stops" symptom this check exists to close off.
-      if (truncated) {
-        loopState.truncatedCount++;
-        if (loopState.truncatedCount > MAX_CONSECUTIVE_TRUNCATIONS) {
-          return {
-            done: true,
-            stopLoop: true,
-            assistantText: `${fullContent}\n\n---\n**Stopped:** the response kept getting cut off by the output-length limit ${loopState.truncatedCount} times in a row before finishing. Try a shorter request, a lower extended-thinking budget, or a model with a larger output limit.`
-          };
-        }
-        localHistory.push({
-          role: 'user',
-          content: 'Your previous response was cut off by the output length limit before finishing (no tool call was in progress). Continue your answer from where it left off.'
-        });
-        return { done: false, assistantText: fullContent, stopLoop: false };
-      }
-      loopState.truncatedCount = 0;
-
-      // A model can drift into some other tool-invocation syntax instead of the
-      // "<tool_call name=...>" format this app's tool loop actually parses:
-      //   - its own native function-calling syntax ("<invoke name=...>
-      //     <parameter name=...>"), sometimes with raw undecoded special tokens
-      //     (seen in practice as a literal "DSML" placeholder, or stray "|"/"｜"
-      //     pipes) spliced into the tag scaffolding — e.g.
-      //     "< | DSML | parameter name=\"path\">/</ | DSML | parameter>";
-      //   - an invented tag name ("<tool_check><command>ls</command>
-      //     </tool_check>") or a "<tool_call>" with the name attribute dropped.
-      // None of that matches parseToolCalls, so without this check it was
-      // accepted as a genuine finished answer, ending the run mid-task and
-      // making the user type "continue". Match loosely (words allowed to trail
-      // a "<"/"</" by a few stray characters, not just immediately) and correct
-      // the model instead. Scanned across reply *and* thinking, since the model
-      // often makes this mistake inside a thinking block.
-      const looksLikeMalformedToolCall =
-        /<\s*\/?[^a-zA-Z\n]{0,6}(invoke|parameter)\b/i.test(emitted) ||
-        /\bDSML\b/i.test(emitted) ||
-        // Opening tag only — a bare "</tool_call>" is handled by the truncation
-        // check above. The lookahead exempts *only* the exact well-formed
-        // "<tool_call name=...>"; a near-miss like "<tool_use name=...>" still
-        // gets flagged, since a plausible-looking name attribute doesn't make
-        // an invented tag executable.
-        /<\s*(?!tool_call\s+name\s*=)(tool[_-]?\w*|function[_-]?call)\b/i.test(emitted);
-      if (looksLikeMalformedToolCall) {
-        loopState.malformedCount++;
-        if (loopState.malformedCount > MAX_CONSECUTIVE_MALFORMED_TOOL_CALLS) {
-          // More retries won't fix a model/provider that can't emit the
-          // expected format at all — stop and say so plainly instead of
-          // spinning silently (distinct from the unbounded main loop, which
-          // is fine to keep retrying real, in-progress work indefinitely).
-          return {
-            done: true,
-            stopLoop: true,
-            assistantText: `${fullContent}\n\n---\n**Stopped:** the model repeated an invalid/garbled tool-call format ${loopState.malformedCount} times in a row instead of using this app's expected format. This usually means the current model doesn't support this app's tool-calling protocol reliably — try switching models (\`/model\`) rather than retrying.`
-          };
-        }
-        localHistory.push({
-          role: 'user',
-          content: 'Your previous response used an invalid tool-call format (garbled tag, invented tag name such as <tool_check>, or a missing name attribute) and was NOT executed. You must use exactly this format, with no other function-calling syntax, tokens, or extra characters: <tool_call name="TOOL_NAME"><param_name>value</param_name></tool_call> — the literal tag is `tool_call` and the `name` attribute is required. Write it in your visible reply, not inside your reasoning. Retry the tool call now in that exact format.'
-        });
-        return { done: false, assistantText: fullContent, stopLoop: false };
-      }
-      loopState.malformedCount = 0;
-      return { done: true, assistantText: fullContent, stopLoop: true };
+      return this.handleNoToolCalls(fullContent, fullReasoning, truncated, native, localHistory, loopState);
     }
     loopState.malformedCount = 0;
+    loopState.truncatedCount = 0;
 
-    for (let idx = 0; idx < toolCalls.length; idx++) {
-      const tool = toolCalls[idx];
-      // Tell UI we are starting tool call
-      this.say('toolCallStarted', { tool: tool.name, args: tool.args });
-
-      // Add node for this step in visual graph, nested under this run
-      const nodeId = `tool-${stepLabel}-${idx}-${tool.name}`;
-      if (this.graphStore) {
-        this.graphStore.addNode({
-          id: nodeId,
-          type: "chunk",
-          label: `${tool.name}`,
-          description: `Args: ${Object.keys(tool.args).join(', ')}`,
-          status: "running",
-          progress: 50,
-          agentRunId: runId
-        });
-        this.graphStore.addEdge(runId, nodeId);
-        this.say('graphUpdated', this.graphStore.get());
-      }
-
-      let resultOutput = '';
-      if (!agent.allowedTools.includes(tool.name as ToolName)) {
-        // Hard allowlist gate — covers control-flow tools (ask_clarification,
-        // update_todo_list) too, not just tools routed through ToolExecutor.
-        resultOutput = `Tool '${tool.name}' is not permitted for the ${agent.label} agent. Available tools: ${agent.allowedTools.join(', ')}`;
-        if (this.graphStore) {
-          this.graphStore.updateNode(nodeId, { status: "failed", details: "Not in this agent's tool allowlist." });
-          this.say('graphUpdated', this.graphStore.get());
-        }
-        this.say('toolFinished', { tool: tool.name, success: false, output: resultOutput });
-      } else {
-        let approved = true;
-        const isHighRisk = agent.highRiskTools.includes(tool.name as ToolName) && !isAutoApprove();
-        if (isHighRisk) {
-          let diffPayload: { fileExisted?: boolean; diffHunks?: any[] } = {};
-          if (tool.name === 'write_file' && tool.args.path) {
-            const absPath = path.resolve(root, tool.args.path);
-            const fileExisted = fs.existsSync(absPath);
-            const oldContent = fileExisted ? (this.readFileCapped(absPath) ?? '') : '';
-            diffPayload = { fileExisted, diffHunks: diffLines(oldContent, tool.args.content || '') };
-          }
-          this.say('toolApprovalRequired', { tool: tool.name, args: tool.args, ...diffPayload });
-          approved = await this.waitForApproval(tool.name, tool.args);
-        }
-
-        if (tool.name === 'update_todo_list') {
-          const tasksText = tool.args.tasks || '';
-          const tasks = this.parseTodoList(tasksText);
-          this.todoList = tasks;
-          this.say('todoListUpdated', { tasks: this.todoList });
-          resultOutput = `Todo list updated with ${tasks.length} items.`;
-
-          if (this.graphStore) {
-            this.graphStore.updateNode(nodeId, {
-              status: "completed",
-              progress: 100
-            });
-            this.say('graphUpdated', this.graphStore.get());
-          }
-          this.say('toolFinished', { tool: tool.name, success: true, output: resultOutput });
-        } else if (tool.name === 'ask_clarification') {
-          const questionsText = tool.args.questions || tool.args.question || '';
-          this.say('showClarificationPopup', { questions: questionsText });
-          this.say('agentState', { state: 'paused' });
-
-          const answersText = await new Promise<string>((resolve) => {
-            this.pendingClarification = { resolve };
-          });
-
-          resultOutput = answersText;
-
-          if (this.graphStore) {
-            this.graphStore.updateNode(nodeId, {
-              status: "completed",
-              progress: 100
-            });
-            this.say('graphUpdated', this.graphStore.get());
-          }
-          this.say('toolFinished', { tool: tool.name, success: true, output: resultOutput });
-        } else if (approved) {
-          this.say('toolExecuting', { tool: tool.name });
-
-          // Before-image capture for revert — must happen before the write
-          // actually executes. Captured unconditionally (even if the write
-          // later fails); reverting a no-op change is harmless.
-          if ((tool.name === 'write_file' || tool.name === 'edit_file') && tool.args.path) {
-            const absPath = path.resolve(root, tool.args.path);
-            const existedBefore = fs.existsSync(absPath);
-            checkpoint.push({
-              path: tool.args.path,
-              existedBefore,
-              originalContent: existedBefore ? (this.readFileCapped(absPath) ?? undefined) : undefined
-            });
-          }
-
-          // Stream execute_command's stdout/stderr live into its tool card
-          // instead of leaving the card silent until the whole command
-          // (e.g. a long bench migrate/build) finishes.
-          const onOutputChunk = tool.name === 'execute_command'
-            ? (chunk: string) => this.say('toolOutputChunk', { tool: tool.name, chunk })
-            : undefined;
-          const result = await this.toolExecutor.runTool(tool.name, tool.args, agent.allowedTools, onOutputChunk);
-          resultOutput = result.output;
-
-          if (result.success && tool.name === 'use_skill' && tool.args.id) {
-            const meta = this.skillsStore?.listSkills().find(s => s.id === tool.args.id);
-            this.say('skillEvent', {
-              kind: 'loaded',
-              id: tool.args.id,
-              name: meta?.name || tool.args.id,
-              auto: false
-            });
-          }
-
-          // Compile validation & touched-file tracking (for the end-of-run verification phase)
-          let validationOutput = '';
-          if (result.success && (tool.name === 'write_file' || tool.name === 'edit_file')) {
-            const absPath = path.resolve(root, tool.args.path);
-            touchedFiles.push(classifyTouchedFile(tool.args.path, absPath));
-
-            const ext = path.extname(tool.args.path);
-            if (ext === '.py' || ext === '.js') {
-              const validateCmd = ext === '.py'
-                ? `python -m py_compile "${absPath}"`
-                : `node -c "${absPath}"`;
-
-              const valResult = await this.toolExecutor.executeCommand(validateCmd);
-              if (!valResult.success) {
-                validationOutput = `\n\n[LINTER WARNING] File compiled with error:\n${valResult.output}`;
-                this.chat('error', `⚠️ Linter warning on ${tool.args.path}: compilation check failed.`);
-
-                if (this.graphStore) {
-                  this.graphStore.updateNode(nodeId, {
-                    status: "failed",
-                    details: "Compilation validation failed."
-                  });
-                  this.say('graphUpdated', this.graphStore.get());
-                }
-              }
-            }
-          }
-
-          resultOutput += validationOutput;
-
-          if (this.graphStore && !validationOutput) {
-            this.graphStore.updateNode(nodeId, {
-              status: result.success ? "completed" : "failed",
-              progress: 100
-            });
-            this.say('graphUpdated', this.graphStore.get());
-          }
-
-          this.say('toolFinished', { tool: tool.name, success: result.success && !validationOutput, output: resultOutput });
-        } else {
-          resultOutput = 'Tool execution rejected by the user.';
-
-          if (this.graphStore) {
-            this.graphStore.updateNode(nodeId, {
-              status: "failed",
-              details: "Rejected by user."
-            });
-            this.say('graphUpdated', this.graphStore.get());
-          }
-
-          this.say('toolFinished', { tool: tool.name, success: false, output: resultOutput });
-        }
-      }
-
-      // Append tool result to this run's own local transcript (not the main session log)
-      const resultMsg = `<tool_result name="${tool.name}">\n${resultOutput}\n</tool_result>`;
-      localHistory.push({ role: 'user', content: resultMsg });
+    const results: ToolResultBlock[] = [];
+    for (const batch of batchToolCalls(toolCalls)) {
+      const outs = await Promise.all(batch.map(call =>
+        this.executeToolCall(agent, session, call, stepLabel, runId, root, touchedFiles, checkpoint)
+      ));
+      batch.forEach((call, k) => results.push({
+        toolCallId: call.callId, name: call.name, content: outs[k].output, isError: !outs[k].success,
+      }));
     }
 
+    if (nativeCalls.length > 0) {
+      localHistory.push({ role: 'user', content: '', toolResults: results });
+    } else {
+      for (const r of results) {
+        localHistory.push({ role: 'user', content: `<tool_result name="${r.name}">\n${r.content}\n</tool_result>` });
+      }
+    }
     return { done: false, assistantText: fullContent, stopLoop: false };
+  }
+
+  /** Parses XML-protocol tool calls from the reply. With extended thinking on,
+   *  the model sometimes emits the whole <tool_call> block inside its thinking
+   *  stream instead, so fall back to that and fold the recovered calls into
+   *  the assistant turn the tool results will answer. */
+  private extractXmlToolCalls(content: string, reasoning: string, localHistory: Message[], idPrefix: string): PendingToolCall[] {
+    let parsed = this.parseToolCalls(content);
+    let transcriptText = content;
+    if (parsed.length === 0 && reasoning.trim()) {
+      const recovered = this.parseToolCalls(reasoning);
+      if (recovered.length > 0) {
+        parsed = recovered;
+        transcriptText = [content.trim(), ...recovered.map(c => c.raw)].filter(Boolean).join('\n\n');
+      }
+    }
+    if (transcriptText.trim()) {
+      localHistory.push({ role: 'assistant', content: transcriptText });
+    }
+    return parsed.map((c, idx) => ({ callId: `${idPrefix}-${idx}`, name: c.name, args: c.args }));
+  }
+
+  /** A step with no tool calls normally ends the run — unless the reply was
+   *  cut off by the output limit, or (XML protocol) the model garbled the
+   *  tool-call syntax, in which case nudge it and keep looping. */
+  private handleNoToolCalls(
+    fullContent: string,
+    fullReasoning: string,
+    truncated: boolean,
+    native: boolean,
+    localHistory: Message[],
+    loopState: { malformedCount: number; streamErrorCount: number; truncatedCount: number }
+  ): AgentStepResult {
+    const emitted = `${fullContent}\n${fullReasoning}`;
+    const openCount = (emitted.match(/<tool_call\s+name="/g) || []).length;
+    const closeCount = (emitted.match(/<\/tool_call>/g) || []).length;
+    const danglingXmlCall = !native && openCount > closeCount;
+
+    if (truncated || danglingXmlCall) {
+      loopState.truncatedCount++;
+      if (loopState.truncatedCount > MAX_CONSECUTIVE_TRUNCATIONS) {
+        return {
+          done: true,
+          stopLoop: true,
+          assistantText: `${fullContent}\n\n---\n**Stopped:** the response kept getting cut off by the output-length limit ${loopState.truncatedCount} times in a row before finishing. Try a shorter request, a lower extended-thinking budget, or a model with a larger output limit.`
+        };
+      }
+      localHistory.push({
+        role: 'user',
+        content: 'Your previous response was cut off by the output length limit before finishing, so any tool call in it was NOT executed. Continue from where you left off; if you were writing a large file, split it into smaller write_file/edit_file calls.'
+      });
+      return { done: false, assistantText: fullContent, stopLoop: false };
+    }
+    loopState.truncatedCount = 0;
+
+    // A model can drift into another invocation syntax (its own <invoke>/
+    // <parameter> scaffolding, stray "DSML" tokens, invented tags like
+    // <tool_check>) that parseToolCalls doesn't match. Accepting that as a
+    // finished answer would end the run mid-task, so correct the model instead.
+    // Only meaningful for the XML protocol.
+    const looksLikeMalformedToolCall = !native && (
+      /<\s*\/?[^a-zA-Z\n]{0,6}(invoke|parameter)\b/i.test(emitted) ||
+      /\bDSML\b/i.test(emitted) ||
+      /<\s*(?!tool_call\s+name\s*=)(tool[_-]?\w*|function[_-]?call)\b/i.test(emitted)
+    );
+    if (looksLikeMalformedToolCall) {
+      loopState.malformedCount++;
+      if (loopState.malformedCount > MAX_CONSECUTIVE_MALFORMED_TOOL_CALLS) {
+        return {
+          done: true,
+          stopLoop: true,
+          assistantText: `${fullContent}\n\n---\n**Stopped:** the model repeated an invalid/garbled tool-call format ${loopState.malformedCount} times in a row instead of using this app's expected format. This usually means the current model doesn't support this app's tool-calling protocol reliably — try switching models (\`/model\`) rather than retrying.`
+        };
+      }
+      localHistory.push({
+        role: 'user',
+        content: 'Your previous response used an invalid tool-call format (garbled tag, invented tag name such as <tool_check>, or a missing name attribute) and was NOT executed. You must use exactly this format, with no other function-calling syntax, tokens, or extra characters: <tool_call name="TOOL_NAME"><param_name>value</param_name></tool_call> — the literal tag is `tool_call` and the `name` attribute is required. Write it in your visible reply, not inside your reasoning. Retry the tool call now in that exact format.'
+      });
+      return { done: false, assistantText: fullContent, stopLoop: false };
+    }
+    loopState.malformedCount = 0;
+    return { done: true, assistantText: fullContent, stopLoop: true };
+  }
+
+  /** Runs one tool call end to end: allowlist gate, approval, checkpointing,
+   *  execution, post-write syntax check, and graph/UI updates. Safe to run
+   *  concurrently for READ_ONLY_TOOLS — those never prompt or checkpoint. */
+  private async executeToolCall(
+    agent: AgentDefinition,
+    session: Session,
+    tool: PendingToolCall,
+    stepLabel: string,
+    runId: string,
+    root: string,
+    touchedFiles: TouchedFile[],
+    checkpoint: CheckpointEntry[]
+  ): Promise<{ success: boolean; output: string }> {
+    const callId = tool.callId;
+    const ui = (event: string, payload: Record<string, any> = {}) => this.say(event, { tool: tool.name, callId, ...payload });
+    ui('toolCallStarted', { args: tool.args });
+
+    const nodeId = `tool-${stepLabel}-${callId}-${tool.name}`;
+    this.graphAdd(nodeId, runId, tool);
+    const finish = (success: boolean, output: string, details?: string) => {
+      this.graphUpdate(nodeId, success, details);
+      ui('toolFinished', { success, output });
+      return { success, output };
+    };
+
+    if (this.aborted) return finish(false, 'Cancelled by the user before this tool ran.', 'Cancelled.');
+    if (!agent.allowedTools.includes(tool.name as ToolName)) {
+      // Hard allowlist gate — covers control-flow tools too, not just ToolExecutor ones.
+      return finish(false, `Tool '${tool.name}' is not permitted for the ${agent.label} agent. Available tools: ${agent.allowedTools.join(', ')}`, "Not in this agent's tool allowlist.");
+    }
+
+    if (agent.highRiskTools.includes(tool.name as ToolName) && !isAutoApprove() && !this.alwaysAllowed.has(tool.name)) {
+      ui('toolApprovalRequired', { args: tool.args, ...this.approvalDiff(tool, root) });
+      if (!(await this.waitForApproval(tool.name, tool.args))) {
+        return finish(false, 'Tool execution rejected by the user.', 'Rejected by user.');
+      }
+    }
+
+    if (tool.name === 'update_todo_list') {
+      const res = this.todos.update(tool.args);
+      this.sendTodos();
+      return finish(res.ok, res.output);
+    }
+    if (tool.name === 'ask_clarification') {
+      this.say('showClarificationPopup', { questions: String(tool.args.questions || tool.args.question || '') });
+      this.say('agentState', { state: 'paused' });
+      const answers = await new Promise<string>(resolve => { this.pendingClarification = { resolve }; });
+      return finish(true, answers);
+    }
+
+    ui('toolExecuting');
+    const filePath = typeof tool.args.path === 'string' ? tool.args.path : '';
+    const writesFile = FILE_WRITE_TOOLS.has(tool.name) && !!filePath;
+    if (writesFile) {
+      // Before-image for revert — captured before the write runs, even if it later fails.
+      const absPath = path.resolve(root, filePath);
+      const existedBefore = fs.existsSync(absPath);
+      checkpoint.push({
+        path: filePath,
+        existedBefore,
+        originalContent: existedBefore ? (this.readFileCapped(absPath) ?? undefined) : undefined
+      });
+    }
+
+    // Stream execute_command's output live into its tool card.
+    const onOutputChunk = tool.name === 'execute_command'
+      ? (chunk: string) => ui('toolOutputChunk', { chunk })
+      : undefined;
+    const result = this.contextTools.handles(tool.name)
+      ? await this.contextTools.run(tool.name, tool.args)
+      : tool.name === 'task'
+        ? await this.runSubagent(tool.args, session, runId, root, touchedFiles, checkpoint)
+        : await this.toolExecutor.runTool(tool.name, tool.args, agent.allowedTools, onOutputChunk);
+
+    if (result.success && tool.name === 'use_skill' && tool.args.id) {
+      const meta = this.skillsStore?.listSkills().find(s => s.id === tool.args.id);
+      this.say('skillEvent', { kind: 'loaded', id: tool.args.id, name: meta?.name || tool.args.id, auto: false });
+      result.output += this.skillRouter?.adapterFor(String(tool.args.id)) || '';
+    }
+    // Point the agent at a skill this call just made relevant (test files, git commits, a hard-won fix…).
+    const skillHint = this.skillRouter?.observe({ tool: tool.name, args: tool.args, success: result.success }, this.runSkills);
+    if (skillHint) result.output += skillHint;
+    if (agent.allowedTools.includes('update_todo_list')) {
+      result.output += this.todos.afterToolCall(tool.name) || '';
+    }
+
+    if (!(result.success && writesFile)) return finish(result.success, result.output);
+    const absPath = path.resolve(root, filePath);
+    touchedFiles.push(classifyTouchedFile(filePath, absPath));
+    const lintError = await this.syntaxCheck(absPath);
+    if (!lintError) return finish(true, result.output);
+    this.chat('error', `⚠️ Linter warning on ${filePath}: compilation check failed.`);
+    return finish(false, `${result.output}\n\n[LINTER WARNING] File compiled with error:\n${lintError}`, 'Compilation validation failed.');
+  }
+
+  /** Diff preview for the approval card. */
+  private approvalDiff(tool: PendingToolCall, root: string): { fileExisted?: boolean; diffHunks?: any[] } {
+    const a = tool.args;
+    if (tool.name === 'write_file' && typeof a.path === 'string') {
+      const absPath = path.resolve(root, a.path);
+      const fileExisted = fs.existsSync(absPath);
+      const oldContent = fileExisted ? (this.readFileCapped(absPath) ?? '') : '';
+      return { fileExisted, diffHunks: diffLines(oldContent, String(a.content || '')) };
+    }
+    if (tool.name === 'edit_file') {
+      return { fileExisted: true, diffHunks: diffLines(String(a.search ?? ''), String(a.replace ?? '')) };
+    }
+    if (tool.name === 'multi_edit') {
+      let edits: any[] = [];
+      try { edits = typeof a.edits === 'string' ? JSON.parse(a.edits) : (a.edits || []); } catch { /* shown without a diff */ }
+      if (!Array.isArray(edits)) return {};
+      return { fileExisted: true, diffHunks: edits.flatMap((e: any) => diffLines(String(e.search ?? ''), String(e.replace ?? ''))) };
+    }
+    return {};
+  }
+
+  /** Quick compile check after a write — returns the error text, or null. */
+  private async syntaxCheck(absPath: string): Promise<string | null> {
+    const ext = path.extname(absPath);
+    if (ext !== '.py' && ext !== '.js') return null;
+    const cmd = ext === '.py' ? `python -m py_compile "${absPath}"` : `node -c "${absPath}"`;
+    const res = await this.toolExecutor.executeCommand(cmd);
+    return res.success ? null : res.output;
+  }
+
+  /** Runs a delegated task (the `task` tool) as an isolated agent run with a
+   *  fresh transcript, and returns its final reply as the tool result. File
+   *  changes land in the parent's checkpoint so "revert" still covers them. */
+  private async runSubagent(
+    args: Record<string, any>,
+    session: Session,
+    parentRunId: string,
+    root: string,
+    touchedFiles: TouchedFile[],
+    checkpoint: CheckpointEntry[]
+  ): Promise<{ success: boolean; output: string }> {
+    const type = String(args.subagent_type || 'explore');
+    const agent = buildSubagent(type);
+    if (!agent) return { success: false, output: `Unknown subagent_type '${type}'. Available: ${SUBAGENT_TYPES.map(a => a.id).join(', ')}` };
+    const prompt = String(args.prompt || '').trim();
+    if (!prompt) return { success: false, output: 'Missing prompt — give the sub-agent a complete task brief.' };
+    const description = String(args.description || agent.label);
+
+    const runId = this.sessionManager.generateRunId();
+    const history: Message[] = [{ role: 'user', content: prompt }];
+    const loopState = { malformedCount: 0, streamErrorCount: 0, truncatedCount: 0 };
+    this.chat('system', `${agent.icon} Sub-agent **${agent.label}** started: ${description}`);
+    this.graphStore?.addNode({ id: runId, type: 'reader', label: `${agent.icon} ${description}`, description: agent.label, status: 'running', progress: 30, agentRunId: runId });
+    this.graphStore?.addEdge(parentRunId, runId, 'task');
+
+    let report = '';
+    let done = false;
+    for (let step = 1; step <= MAX_SUBAGENT_STEPS && !this.aborted; step++) {
+      const r = await this.runOneAgentStep(agent, session, prompt, [], history, touchedFiles, checkpoint, runId, root, `${runId}-${step}`, loopState);
+      if (r.assistantText.trim()) report = r.assistantText;
+      if (r.done) { done = true; break; }
+      if (r.stopLoop) break;
+    }
+    this.sessionManager.writeRunTranscript(session.id, runId, history);
+    this.graphUpdate(runId, done);
+    this.chat('system', `${agent.icon} Sub-agent **${agent.label}** ${done ? 'finished' : 'stopped'}: ${description}`);
+    if (!done) {
+      const why = this.aborted ? 'cancelled by the user' : 'step limit or repeated errors';
+      return { success: false, output: `${report ? report + '\n\n' : ''}[Sub-agent stopped before finishing: ${why}.]` };
+    }
+    return { success: true, output: report || '(sub-agent finished without a report)' };
+  }
+
+  /** Records the step's real prompt size (estimated when the provider
+   *  doesn't report usage), updates the context badge, and clears older tool
+   *  output from the run once it nears the model's context window. */
+  private trackContextUsage(streamed: StreamResult, sent: Message[], localHistory: Message[]): void {
+    const window = contextWindowFor(this.activeModel || this.provider.getModelId?.() || '');
+    const prompt = streamed.usage?.promptTokens || estimateMessagesTokens(sent);
+    this.lastPromptTokens = prompt;
+    this.say('tokenUsage', { estimatedTokens: prompt, budget: window, live: true });
+    // Providers that clear old tool results server-side must get an
+    // append-only history — rewriting it invalidates thinking blocks.
+    if (this.provider.managesContextServerSide?.()) return;
+    const freed = pruneRunHistory(localHistory, prompt + (streamed.usage?.completionTokens || 0), window);
+    if (freed > 0) {
+      console.log(`[context] cleared ~${Math.round(freed / 4)} tokens of older tool output (${prompt}/${window})`);
+    }
+  }
+
+  /** Knowledge-base snippets for XML-protocol models, which don't reliably
+   *  call search_knowledge themselves. Cached per query so a multi-step run
+   *  embeds once and keeps a byte-identical (cacheable) system prompt. */
+  private async injectedKnowledge(query: string): Promise<string> {
+    if (!this.vectorStore) return '';
+    if (this.ragCache?.query === query) return this.ragCache.text;
+    let text = '';
+    try {
+      const results = await this.vectorStore.search(query, 6);
+      if (results.length > 0) {
+        text = `\n\n### Retrieved Knowledge Base Context\nRetrieved from framework docs, this workspace's own code, your notes, skills, and other agents' memory — use it to follow correct APIs and this project's existing patterns:\n\n` +
+          results.map(r => `--- [Source: ${r.source}] ---\n${r.text}`).join('\n\n');
+      }
+    } catch (e) {
+      console.error('Failed to run vector search:', e);
+    }
+    this.ragCache = { query, text };
+    return text;
+  }
+
+  private graphAdd(nodeId: string, runId: string, tool: PendingToolCall): void {
+    if (!this.graphStore) return;
+    this.graphStore.addNode({
+      id: nodeId,
+      type: "chunk",
+      label: `${tool.name}`,
+      description: `Args: ${Object.keys(tool.args).join(', ')}`,
+      status: "running",
+      progress: 50,
+      agentRunId: runId
+    });
+    this.graphStore.addEdge(runId, nodeId);
+    this.say('graphUpdated', this.graphStore.get());
+  }
+
+  private graphUpdate(nodeId: string, success: boolean, details?: string): void {
+    if (!this.graphStore) return;
+    this.graphStore.updateNode(nodeId, { status: success ? "completed" : "failed", progress: 100, details });
+    this.say('graphUpdated', this.graphStore.get());
   }
 
   /** Harness-driven verification: runs bench migrate / scoped tests directly
@@ -1723,7 +1871,7 @@ export class ChatPanel implements vscode.WebviewViewProvider {
       lastAssistantText
     });
 
-    const site = readConfig()?.defaultSite;
+    const site = this.benchEnv && this.benchEnv.type !== 'not-found' ? (await this.toolExecutor.sites.resolve()).site : null;
     if (!site || !this.benchEnv || this.benchEnv.type === 'not-found') {
       return skip('no site or bench environment configured');
     }
@@ -1821,37 +1969,105 @@ export class ChatPanel implements vscode.WebviewViewProvider {
    *  to be found and executed (see runOneAgentStep). `truncated` is set when
    *  any chunk reported the provider cut the turn off at its output-token
    *  ceiling — see ChatResponse.truncated and the caller's handling of it. */
-  private async stream(msgs: { role: string; content: string }[], runId?: string): Promise<{ content: string; reasoning: string; truncated: boolean }> {
-    var full = '', fullReasoning = '', truncated = false, id = '' + Date.now();
+  private async stream(msgs: Message[], runId?: string, tools?: ToolSpec[], effort?: EffortLevel): Promise<StreamResult> {
+    let full = '', fullReasoning = '', truncated = false;
+    let toolCalls: ToolCall[] | undefined;
+    let thinkingBlocks: ThinkingBlock[] | undefined;
+    let usage: ChatResponse['usage'];
+    // Unique even for parallel sub-agent streams started in the same millisecond.
+    const id = `${Date.now()}-${++this.streamSeq}`;
     this.postWebviewMessage({ type: 'startStream', messageId: id });
     try {
-      const options: any = { maxTokens: 16384 };
-      if (this.activeModel) {
-        options.model = this.activeModel;
-      }
-      if (runId) {
-        options.runId = runId;
-      }
+      const options: ChatOptions = { maxTokens: 16384 };
+      if (this.activeModel) options.model = this.activeModel;
+      if (runId) options.runId = runId;
+      if (tools?.length) options.tools = tools;
+      if (effort) options.effort = effort;
       options.onRetry = (attempt: number, delaySec: number, error: string) => {
         this.say('retryNotice', { attempt, delaySec, error });
       };
-      for await (const c of this.provider.chatStream(msgs as any, options, this.abortController?.signal || undefined)) {
+      for await (const c of this.provider.chatStream(msgs, options, this.abortController?.signal || undefined)) {
         if (this.aborted) {
           throw new Error('Streaming aborted by user.');
         }
         full += c.content;
         fullReasoning += c.reasoning || '';
         if (c.truncated) truncated = true;
-        this.postWebviewMessage({
-          type: 'streamChunk',
-          messageId: id,
-          chunk: c.content,
-          reasoning: c.reasoning || ''
-        });
+        if (c.toolCalls?.length) toolCalls = [...(toolCalls || []), ...c.toolCalls];
+        if (c.thinkingBlocks?.length) thinkingBlocks = [...(thinkingBlocks || []), ...c.thinkingBlocks];
+        if (c.usage?.promptTokens) usage = c.usage;
+        if (c.content || c.reasoning) {
+          this.postWebviewMessage({
+            type: 'streamChunk',
+            messageId: id,
+            chunk: c.content,
+            reasoning: c.reasoning || ''
+          });
+        }
       }
     } catch (e) { this.postWebviewMessage({ type: 'streamError', messageId: id, error: String(e) }); throw e; }
     this.postWebviewMessage({ type: 'endStream', messageId: id, fullContent: full, fullReasoning: fullReasoning });
-    return { content: full, reasoning: fullReasoning, truncated };
+    return { content: full, reasoning: fullReasoning, truncated, toolCalls, thinkingBlocks, usage };
+  }
+
+  /** Sends the provider's model list to the picker. Cached per provider so
+   *  reopening the panel is instant; `force` pulls a fresh list from the API. */
+  private async sendModels(force: boolean): Promise<void> {
+    const provider = this.provider.name;
+    if (force || !this.modelCache || this.modelCache.provider !== provider) {
+      try {
+        const models = this.provider.getModels ? await this.provider.getModels() : [];
+        this.modelCache = { provider, models, fetchedAt: Date.now() };
+      } catch (e: any) {
+        this.say('modelsList', { models: this.modelCache?.models || [], error: e.message || String(e) });
+        return;
+      }
+    }
+    const { models, fetchedAt } = this.modelCache;
+    const configured = this.provider.getModelId?.();
+    const activeModel = this.activeModel || (configured && models.includes(configured) ? configured : configured || models[0]);
+    this.say('modelsList', { models, activeModel, fetchedAt, provider });
+    this.sendEffort();
+  }
+
+  /** The model being used right now — the picker's choice, else the provider default. */
+  private currentModel(): string {
+    return this.activeModel || this.provider.getModelId?.() || '';
+  }
+
+  /** The user's effort choice, or undefined to use the model's default. */
+  private effortSetting(): EffortLevel | undefined {
+    const v = vscode.workspace.getConfiguration('frappe-copilot').get<string>('effort', '');
+    return isEffortLevel(v) ? v : undefined;
+  }
+
+  /** Effort for one agent run: the user's choice (or the model default),
+   *  capped by the agent — read-only explore sub-agents don't need depth. */
+  private effortFor(agent: AgentDefinition): EffortLevel | undefined {
+    const caps = capsFor(this.currentModel());
+    const chosen = this.effortSetting();
+    if (!agent.maxEffort) return chosen;
+    const base = chosen ?? caps.defaultEffort;
+    if (!base) return chosen;
+    return EFFORT_LEVELS.indexOf(base) > EFFORT_LEVELS.indexOf(agent.maxEffort) ? clampEffort(agent.maxEffort, caps) : chosen;
+  }
+
+  /** What the effort picker should offer for the current model. */
+  private sendEffort(): void {
+    const caps = capsFor(this.currentModel());
+    this.say('effortInfo', {
+      levels: caps.effortLevels,
+      recommended: caps.defaultEffort || null,
+      effort: this.effortSetting() || null,
+    });
+  }
+
+  /** Native tool calling when the provider supports it and the user hasn't
+   *  opted out; otherwise the XML text protocol. */
+  private useNativeTools(): boolean {
+    if (this.nativeToolsDisabled) return false;
+    const enabled = vscode.workspace.getConfiguration('frappe-copilot').get<boolean>('nativeToolCalling', true);
+    return enabled && !!this.provider.supportsNativeTools?.();
   }
 
   private postWebviewMessage(msg: any) {
@@ -1871,9 +2087,28 @@ export class ChatPanel implements vscode.WebviewViewProvider {
    *  while this ChatPanel object (and its VectorStore) lives on for a later
    *  show() to reuse. Only extension deactivation should actually tear the
    *  watcher down. */
+  /** Kills commands the agent started with run_in_background. */
+  disposeBackgroundCommands(): void {
+    this.toolExecutor.background.disposeAll();
+  }
+
   disposeVectorStoreWatchers(): void {
     this.vectorStoreWatchers.forEach(d => d.dispose());
     this.vectorStoreWatchers = [];
+  }
+
+  /** Loads the site's apps and DocType names (for list_doctypes and the
+   *  prompt's site summary) and caches them next to the session data. */
+  private async refreshSchema(schemaPath?: string): Promise<void> {
+    try {
+      const schema = await this.toolExecutor.fetchSchema();
+      if (!schema) return;
+      this.schemaMap = { doctypes: schema.doctypes, apps: schema.apps };
+      const target = schemaPath || (this.getFrappeCopilotPath() ? path.join(this.getFrappeCopilotPath()!, 'schema_index.json') : null);
+      if (target) fs.writeFileSync(target, JSON.stringify(this.schemaMap, null, 2), 'utf-8');
+    } catch (err) {
+      console.warn('Workspace schema introspection failed:', err);
+    }
   }
 
   private async introspectSchema(fp: string): Promise<void> {
@@ -1887,86 +2122,59 @@ export class ChatPanel implements vscode.WebviewViewProvider {
       }
     }
 
-    try {
-      const { readConfig } = require('../workspace/structure');
-      const config = readConfig();
-      const activeSite = config?.defaultSite;
-      if (!activeSite) return;
-
-      const pythonCmd = "import frappe, json; print(json.dumps({'doctypes': frappe.get_all('DocType', pluck='name'), 'apps': frappe.get_installed_apps()}))";
-      const command = `bench --site ${activeSite} execute --command "${pythonCmd.replace(/"/g, '\\"')}"`;
-      
-      const result = await this.toolExecutor.executeCommand(command);
-      if (result.success && result.output) {
-        const cleanJsonStr = result.output.replace(/^STDOUT:\s*/i, '').trim();
-        const parsed = JSON.parse(cleanJsonStr);
-        if (parsed.doctypes && parsed.apps) {
-          this.schemaMap = parsed;
-          fs.writeFileSync(schemaPath, JSON.stringify(parsed, null, 2), 'utf-8');
-        }
-      }
-    } catch (err) {
-      console.warn('Dynamic workspace schema introspect failed:', err);
-    }
+    await this.refreshSchema(schemaPath);
   }
 
-  private parseTodoList(tasksText: string): any[] {
-    const items: any[] = [];
-    let currentItem: any = null;
+}
 
-    const lines = tasksText.split('\n');
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line) continue;
+/** A tool call from either protocol, normalized for execution. */
+interface PendingToolCall {
+  callId: string;
+  name: string;
+  args: Record<string, any>;
+}
 
-      const idMatch = line.match(/^-\s+id:\s*(.+)$/) || line.match(/^id:\s*(.+)$/);
-      if (idMatch) {
-        if (currentItem && currentItem.id && currentItem.label) {
-          items.push(currentItem);
-        }
-        currentItem = {
-          id: idMatch[1].trim(),
-          label: '',
-          status: 'pending'
-        };
-        continue;
-      }
+interface StreamResult {
+  content: string;
+  reasoning: string;
+  truncated: boolean;
+  toolCalls?: ToolCall[];
+  thinkingBlocks?: ThinkingBlock[];
+  usage?: ChatResponse['usage'];
+}
 
-      const inlineMatch = line.match(/id:\s*([^,]+),\s*label:\s*([^,]+),\s*status:\s*(\w+)/);
-      if (inlineMatch) {
-        if (currentItem && currentItem.id && currentItem.label) {
-          items.push(currentItem);
-        }
-        currentItem = {
-          id: inlineMatch[1].trim(),
-          label: inlineMatch[2].trim(),
-          status: inlineMatch[3].trim()
-        };
-        continue;
-      }
+/** A sub-agent that hasn't finished by now is stuck or over-scoped. */
+const MAX_SUBAGENT_STEPS = 40;
 
-      if (currentItem) {
-        const labelMatch = line.match(/^label:\s*(.+)$/);
-        if (labelMatch) {
-          currentItem.label = labelMatch[1].trim();
-          continue;
-        }
+const FILE_WRITE_TOOLS: ReadonlySet<string> = new Set(['write_file', 'edit_file', 'multi_edit']);
 
-        const statusMatch = line.match(/^status:\s*(.+)$/);
-        if (statusMatch) {
-          const statusVal = statusMatch[1].trim();
-          if (['pending', 'running', 'completed', 'failed'].includes(statusVal)) {
-            currentItem.status = statusVal;
-          }
-          continue;
-        }
-      }
-    }
-
-    if (currentItem && currentItem.id && currentItem.label) {
-      items.push(currentItem);
-    }
-
-    return items;
+/** Groups consecutive read-only calls so they run concurrently; anything with
+ *  side effects (or an approval prompt) runs alone, in order. */
+function batchToolCalls(calls: PendingToolCall[]): PendingToolCall[][] {
+  const batches: PendingToolCall[][] = [];
+  for (const call of calls) {
+    const last = batches[batches.length - 1];
+    if (isParallelSafe(call) && last && isParallelSafe(last[0])) last.push(call);
+    else batches.push([call]);
   }
+  return batches;
+}
+
+function isParallelSafe(call: PendingToolCall): boolean {
+  return READ_ONLY_TOOLS.has(call.name) || (call.name === 'task' && isParallelSafeTask(call.args));
+}
+
+/** Client-side errors (unsupported model, bad credentials, invalid request)
+ *  that will fail identically on every retry. Overload/rate-limit/network
+ *  errors stay retryable. */
+function isPermanentError(e: any): boolean {
+  const msg = String(e?.message || e);
+  if (/overloaded|rate.?limit|timed? ?out|ECONNRESET|ETIMEDOUT|socket hang up|\b(429|5\d\d)\b/i.test(msg)) return false;
+  return /does not support this model|or newer is required|\b(400|401|403|404)\b|invalid[_ ]request|authentication|invalid (x-)?api.?key/i.test(msg);
+}
+
+/** Heuristic for "this endpoint/model doesn't accept the tools parameter". */
+function looksLikeToolsUnsupported(e: any): boolean {
+  const msg = String(e?.message || e);
+  return /\((400|404|422)\)/.test(msg) && /tool|function/i.test(msg) && /support|invalid|unknown|unrecognized|not allowed|extra/i.test(msg);
 }

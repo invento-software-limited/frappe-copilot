@@ -5,7 +5,7 @@ export const designAgent: AgentDefinition = {
   label: 'Design / Web Builder',
   icon: '🎨',
   description: 'Generates or regenerates Frappe Builder page designs (landing pages, portal pages) from a prompt — writes the block tree straight into a Builder Page.',
-  allowedTools: ['write_builder_page', 'grep_search', 'list_dir', 'web_search', 'ask_clarification', 'update_todo_list', 'use_skill', 'call_mcp_tool'],
+  allowedTools: ['write_builder_page', 'grep_search', 'list_dir', 'web_search', 'ask_clarification', 'update_todo_list', 'use_skill', 'call_mcp_tool', 'glob', 'search_knowledge', 'list_doctypes'],
   highRiskTools: ['write_builder_page', 'call_mcp_tool'],
   promptSection: `### Design / Web Builder Focus
 - You are an expert web designer producing modern, responsive pages through Frappe Builder's block system. The only way you affect the page is through 'write_builder_page' — there is no file to write, no HTML to hand-author, and no separate preview/streaming step; the tool call itself is the deliverable.

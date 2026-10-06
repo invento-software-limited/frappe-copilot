@@ -6,7 +6,9 @@ export type ToolName =
   | 'update_todo_list' | 'web_search' | 'web_fetch' | 'use_skill'
   | 'list_customizations' | 'write_custom_field' | 'write_property_setter'
   | 'write_client_script' | 'write_server_script' | 'export_customizations'
-  | 'write_builder_page' | 'call_mcp_tool' | 'scaffold_app' | 'scaffold_doctype';
+  | 'write_builder_page' | 'call_mcp_tool' | 'scaffold_app' | 'scaffold_doctype'
+  | 'glob' | 'multi_edit' | 'command_output' | 'kill_command'
+  | 'task' | 'search_knowledge' | 'list_doctypes';
 
 export const ALL_TOOLS: ToolName[] = [
   'read_file', 'write_file', 'edit_file', 'list_dir', 'grep_search',
@@ -15,7 +17,16 @@ export const ALL_TOOLS: ToolName[] = [
   'list_customizations', 'write_custom_field', 'write_property_setter',
   'write_client_script', 'write_server_script', 'export_customizations',
   'write_builder_page', 'call_mcp_tool', 'scaffold_app', 'scaffold_doctype',
+  'glob', 'multi_edit', 'command_output', 'kill_command',
+  'task', 'search_knowledge', 'list_doctypes',
 ];
+
+/** Tools with no side effects — safe to run concurrently within one step. */
+export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set<ToolName>([
+  'read_file', 'list_dir', 'grep_search', 'glob', 'introspect_doctype',
+  'list_customizations', 'web_search', 'web_fetch', 'use_skill', 'command_output',
+  'search_knowledge', 'list_doctypes',
+]);
 
 /** A task-specialized agent: its own scoped system prompt and tool allowlist,
  *  run as an isolated loop (see runAgentLoop in panel.ts) that continues until
@@ -33,4 +44,6 @@ export interface AgentDefinition {
   /** Subset of allowedTools that still requires user approval before running. */
   highRiskTools: ToolName[];
   model?: string;
+  /** Upper bound on reasoning effort for this agent's runs. */
+  maxEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 }

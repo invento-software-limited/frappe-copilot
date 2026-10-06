@@ -2,18 +2,18 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
-import { Message, ChatOptions, ChatResponse, ImageAttachment } from '../types';
+import { Message, ChatOptions, ChatResponse } from '../types';
 import { LLMProvider } from './interface';
+import { AnthropicTurn, AnthropicStreamState, toAnthropicTurns, toAnthropicTools } from './anthropicMessages';
+import { generationParams, addBeta, CONTEXT_EDITING, CONTEXT_EDITING_BETA } from './anthropicParams';
 
 const API_KEY_SECRET = 'frappe-copilot.anthropicApiKey';
 
-/** A history message flattened to Anthropic's role model, with any hydrated
- *  image attachments kept alongside the text until content blocks are built. */
-interface TransformedMessage {
-  role: string;
-  content: string;
-  images: ImageAttachment[];
-}
+/** Shown when the live /models call fails — newest first. */
+export const CLAUDE_FALLBACK_MODELS = [
+  'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001',
+  'claude-sonnet-5', 'claude-opus-4-8', 'claude-fable-5',
+];
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = 'Anthropic';
@@ -22,6 +22,8 @@ export class AnthropicProvider implements LLMProvider {
   private temperature: number = 0.7;
   private extendedThinking: boolean = false;
   private thinkingBudgetTokens: number = 10000;
+  /** Set once the endpoint rejects server-side context editing. */
+  private contextEditingUnsupported = false;
   private secrets: vscode.SecretStorage;
   private _apiKey: string | undefined = undefined;
 
@@ -222,52 +224,29 @@ export class AnthropicProvider implements LLMProvider {
     return ' This request already retried automatically and is still rate limited. Wait a moment before trying again, or check your usage limits at console.anthropic.com.';
   }
 
-  private transformMessages(messages: Message[]): { system?: string; messages: TransformedMessage[] } {
-    const systemMessage = messages.find(m => m.role === 'system');
-    const systemPrompt = systemMessage ? systemMessage.content : undefined;
-
-    const filtered = messages
-      .filter(m => m.role !== 'system')
-      .map(m => {
-        let role = m.role;
-        if (role !== 'assistant') {
-          role = 'user';
-        }
-        // Only hydrated attachments carry base64; a path-only one (never sent
-        // through ChatPanel.hydrateImages, or whose file went missing) is
-        // dropped rather than shipped as an invalid empty image block.
-        const images = (m.images || []).filter(img => !!img.data);
-        return { role, content: m.content, images };
-      });
-
-    const merged: TransformedMessage[] = [];
-    for (const msg of filtered) {
-      const prev = merged[merged.length - 1];
-      if (prev && prev.role === msg.role) {
-        prev.content += '\n\n' + msg.content;
-        prev.images = [...prev.images, ...msg.images];
-      } else {
-        merged.push({ ...msg });
-      }
-    }
-
-    return { system: systemPrompt, messages: merged };
+  supportsNativeTools(): boolean {
+    return true;
   }
 
-  /** Anthropic wants images *before* the text that refers to them. */
-  private toContentBlocks(msg: TransformedMessage): any[] {
-    const blocks: any[] = msg.images.map(img => ({
-      type: 'image',
-      source: { type: 'base64', media_type: img.mediaType, data: img.data },
-    }));
-    if (msg.content) {
-      blocks.push({ type: 'text', text: msg.content });
-    }
-    return blocks;
+  /** Old tool results are cleared server-side (context editing), so the
+   *  caller must not rewrite history — that would invalidate thinking blocks. */
+  managesContextServerSide(): boolean {
+    return !this.contextEditingUnsupported;
+  }
+
+  private transformMessages(messages: Message[]): { system?: string; messages: AnthropicTurn[] } {
+    // Thinking blocks are replayed whenever the model produced them — current
+    // models think even with the setting off, and reject tool turns whose
+    // thinking was dropped.
+    const { system, turns } = toAnthropicTurns(messages, true);
+    return { system, messages: turns };
   }
 
   private getFallbackModel(model: string): string {
     const fallbacks: Record<string, string> = {
+      'claude-opus-5-5': 'claude-opus-4-8',
+      'claude-sonnet-5-5': 'claude-sonnet-5',
+      'claude-fable-5-1': 'claude-fable-5',
       'claude-sonnet-5': 'claude-opus-4-8',
       'claude-fable-5': 'claude-sonnet-5',
       'claude-opus-4-8': 'claude-sonnet-5',
@@ -290,24 +269,19 @@ export class AnthropicProvider implements LLMProvider {
    *  this is always safe to apply. */
   private applyCacheControl(
     system: string | undefined,
-    transformed: TransformedMessage[]
+    turns: AnthropicTurn[]
   ): { system: any; messages: any[] } {
     const cachedSystem = system
       ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
       : undefined;
 
-    const messages = transformed.map((m, i) => {
-      const isLast = i === transformed.length - 1;
-      // A message with images always needs block form; a plain one only does
-      // when it carries the trailing cache breakpoint.
-      if (!isLast && m.images.length === 0) {
-        return { role: m.role, content: m.content };
-      }
-      const blocks = this.toContentBlocks(m);
-      if (isLast && blocks.length > 0) {
-        blocks[blocks.length - 1].cache_control = { type: 'ephemeral' };
-      }
-      return { role: m.role, content: blocks };
+    const messages = turns.map((t, i) => {
+      if (i !== turns.length - 1) return t;
+      const content = t.content.map(b => ({ ...b }));
+      const last = content[content.length - 1];
+      // Thinking blocks can't carry a cache breakpoint.
+      if (last && !String(last.type).includes('thinking')) last.cache_control = { type: 'ephemeral' };
+      return { role: t.role, content };
     });
 
     return { system: cachedSystem, messages };
@@ -316,10 +290,12 @@ export class AnthropicProvider implements LLMProvider {
   private buildRequestBody(
     model: string,
     system: string | undefined,
-    transformed: TransformedMessage[],
+    transformed: AnthropicTurn[],
     temp: number | undefined,
     maxTokens: number | undefined,
-    stream: boolean
+    stream: boolean,
+    tools?: ChatOptions['tools'],
+    effort?: ChatOptions['effort']
   ): any {
     const { system: cachedSystem, messages } = this.applyCacheControl(system, transformed);
     const body: any = {
@@ -328,19 +304,17 @@ export class AnthropicProvider implements LLMProvider {
       system: cachedSystem,
       stream,
     };
-
-    if (this.extendedThinking) {
-      // Extended thinking requires max_tokens to exceed the thinking budget,
-      // and forbids overriding temperature (the API pins it to 1 internally).
-      body.max_tokens = Math.max(maxTokens || 16384, this.thinkingBudgetTokens + 8192);
-      body.thinking = { type: 'enabled', budget_tokens: this.thinkingBudgetTokens };
-    } else {
-      body.max_tokens = maxTokens || 8192;
-      if (temp !== undefined) {
-        body.temperature = temp;
-      }
+    if (tools?.length) {
+      body.tools = toAnthropicTools(tools);
     }
 
+    Object.assign(body, generationParams({
+      model, stream, maxTokens, temperature: temp, effort,
+      thinking: this.extendedThinking, thinkingBudget: this.thinkingBudgetTokens,
+    }));
+    if (stream && tools?.length && !this.contextEditingUnsupported) {
+      body.context_management = CONTEXT_EDITING;
+    }
     return body;
   }
 
@@ -357,7 +331,7 @@ export class AnthropicProvider implements LLMProvider {
     const MAX_RATE_LIMIT_RETRIES = 3;
 
     const makeRequest = async (model: string, temp: number | undefined): Promise<Response> => {
-      const body = this.buildRequestBody(model, system, transformed, temp, options?.maxTokens, false);
+      const body = this.buildRequestBody(model, system, transformed, temp, options?.maxTokens, false, options?.tools, options?.effort);
 
       return await fetch(url, {
         method: 'POST',
@@ -427,9 +401,13 @@ export class AnthropicProvider implements LLMProvider {
     const blocks: any[] = Array.isArray(data.content) ? data.content : [];
     const content = blocks.filter(b => b.type === 'text').map(b => b.text).join('');
     const reasoning = blocks.filter(b => b.type === 'thinking').map(b => b.thinking).join('');
+    const toolCalls = blocks
+      .filter(b => b.type === 'tool_use')
+      .map(b => ({ id: b.id, name: b.name, input: b.input || {} }));
     const usage = data.usage;
     return {
       content,
+      toolCalls: toolCalls.length ? toolCalls : undefined,
       reasoning: reasoning || undefined,
       model: data.model || this.model,
       truncated: data.stop_reason === 'max_tokens',
@@ -473,7 +451,8 @@ export class AnthropicProvider implements LLMProvider {
         if (abortSignal?.aborted) { return; }
       }
 
-      const body = this.buildRequestBody(modelToUse, system, transformed, tempToUse, options?.maxTokens, true);
+      const body = this.buildRequestBody(modelToUse, system, transformed, tempToUse, options?.maxTokens, true, options?.tools, options?.effort);
+      if (body.context_management) addBeta(headers, CONTEXT_EDITING_BETA);
 
       let response: Response;
       try {
@@ -508,8 +487,8 @@ export class AnthropicProvider implements LLMProvider {
         continue;
       }
 
-      // Check for structural error 400 (temperature)
-      if (response.status === 400 && !temperatureStripped) {
+      // Check for structural error 400 (temperature / context editing)
+      if (response.status === 400) {
         const errorText = await response.text().catch(() => 'Unknown error');
         let errorObj: any;
         try {
@@ -517,7 +496,14 @@ export class AnthropicProvider implements LLMProvider {
         } catch {}
 
         const errorMessage = errorObj?.error?.message || errorText;
-        if (errorMessage.includes('temperature is deprecated')) {
+        if (body.context_management && /context[_-]management|clear_tool_uses/i.test(errorMessage)) {
+          // Endpoint/proxy without context editing — fall back to the client-side trimming.
+          console.warn(`Context editing unavailable, retrying without it: ${errorMessage}`);
+          this.contextEditingUnsupported = true;
+          attempt--;
+          continue;
+        }
+        if (!temperatureStripped && errorMessage.includes('temperature is deprecated')) {
           console.warn(`Stripping temperature parameter and retrying stream due to API error: ${errorMessage}`);
           tempToUse = undefined;
           temperatureStripped = true;
@@ -570,6 +556,9 @@ export class AnthropicProvider implements LLMProvider {
       // indistinguishable from a complete answer, and the agent loop silently
       // ends the run with a chopped-off reply. See ChatResponse.truncated.
       let stopReason: string | undefined;
+      const state = new AnthropicStreamState();
+      let inputTokens = 0;
+      let outputTokens = 0;
 
       try {
         readLoop:
@@ -594,24 +583,22 @@ export class AnthropicProvider implements LLMProvider {
                 // end silently and look like a successful, truncated response.
                 midStreamError = chunk.error?.message || JSON.stringify(chunk.error) || 'Unknown stream error';
                 break readLoop;
-              } else if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'text_delta') {
-                yield {
-                  content: chunk.delta.text || '',
-                  model: modelToUse,
-                };
-              } else if (chunk.type === 'content_block_delta' && chunk.delta?.type === 'thinking_delta') {
-                yield {
-                  content: '',
-                  reasoning: chunk.delta.thinking || '',
-                  model: modelToUse,
-                };
-              } else if (chunk.type === 'message_delta' && chunk.delta?.stop_reason) {
-                stopReason = chunk.delta.stop_reason;
+              }
+              const live = state.onEvent(chunk);
+              if (live.text) {
+                yield { content: live.text, model: modelToUse };
+              } else if (live.thinking) {
+                yield { content: '', reasoning: live.thinking, model: modelToUse };
+              }
+              if (chunk.type === 'message_delta') {
+                if (chunk.delta?.stop_reason) stopReason = chunk.delta.stop_reason;
+                if (chunk.usage?.output_tokens) outputTokens = chunk.usage.output_tokens;
               } else if (chunk.type === 'message_start' && chunk.message?.usage) {
                 // Surfaces prompt-cache effectiveness for this step: a high
                 // cacheReadTokens relative to input_tokens confirms the cache_control
                 // breakpoints in buildRequestBody are actually being hit.
                 const u = chunk.message.usage;
+                inputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
                 if (u.cache_read_input_tokens || u.cache_creation_input_tokens) {
                   console.log(`[Anthropic] cache read=${u.cache_read_input_tokens || 0} write=${u.cache_creation_input_tokens || 0} fresh=${u.input_tokens || 0}`);
                 }
@@ -628,9 +615,19 @@ export class AnthropicProvider implements LLMProvider {
       if (midStreamError) {
         throw new Error(`Anthropic API stream error: ${midStreamError}`);
       }
-      if (stopReason === 'max_tokens') {
-        yield { content: '', model: modelToUse, truncated: true };
+      if (stopReason === 'refusal') {
+        yield { content: '\n\n_The model declined to continue this request (stop reason: refusal). Rephrase it, or switch models._', model: modelToUse };
       }
+      const { toolCalls, thinkingBlocks } = state.finish();
+      const truncated = stopReason === 'max_tokens' || state.incompleteToolCall;
+      yield {
+        content: '',
+        model: modelToUse,
+        truncated,
+        usage: { promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: inputTokens + outputTokens },
+        toolCalls: toolCalls.length ? toolCalls : undefined,
+        thinkingBlocks: thinkingBlocks.length ? thinkingBlocks : undefined,
+      };
       return;
     }
 
@@ -641,34 +638,41 @@ export class AnthropicProvider implements LLMProvider {
     throw lastError || new Error('Anthropic API request failed after retries.');
   }
 
+  getModelId(): string {
+    return this.model;
+  }
+
   async isAvailable(): Promise<boolean> {
     return this.hasApiKey();
   }
 
   async getModels(): Promise<string[]> {
     try {
-      const url = `${this.endpoint}/models`;
+      // The endpoint pages at 20 by default — ask for everything so new
+      // releases aren't cut off, and list newest first.
+      const url = `${this.endpoint}/models?limit=1000`;
       const headers = await this.buildHeaders();
       const response = await fetch(url, {
         method: 'GET',
         headers,
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(8000),
       });
 
       if (response.ok) {
         const data = await response.json() as any;
         if (data && Array.isArray(data.data)) {
           const models = data.data
-            .map((m: any) => m.id)
-            .filter((id: string) => id.startsWith('claude-'));
+            .filter((m: any) => String(m.id).startsWith('claude-'))
+            .sort((a: any, b: any) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
+            .map((m: any) => m.id);
           if (models.length > 0) {
-            return models.sort();
+            return models;
           }
         }
       }
     } catch (e) {
       console.warn('Failed to fetch Anthropic models dynamically:', e);
     }
-    return ['claude-sonnet-5', 'claude-opus-4-8', 'claude-haiku-4-5-20251001', 'claude-fable-5'];
+    return CLAUDE_FALLBACK_MODELS;
   }
 }
