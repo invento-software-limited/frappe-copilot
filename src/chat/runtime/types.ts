@@ -39,10 +39,11 @@ export interface LoopState {
   malformedCount: number;
   streamErrorCount: number;
   truncatedCount: number;
+  emptyCount: number;
 }
 
 export function newLoopState(): LoopState {
-  return { malformedCount: 0, streamErrorCount: 0, truncatedCount: 0 };
+  return { malformedCount: 0, streamErrorCount: 0, truncatedCount: 0, emptyCount: 0 };
 }
 
 /** Everything one agent run carries between its steps. */

@@ -11,7 +11,8 @@ import type { AgentRuntime } from './agentRuntime';
 export class Orchestrator {
   constructor(private rt: AgentRuntime) {}
 
-  async run(userMessage: string, images?: ImageAttachment[]): Promise<void> {
+  /** `skills` are the ids the user picked with "/" (unvalidated webview input). */
+  async run(userMessage: string, images?: ImageAttachment[], skills: unknown = []): Promise<void> {
     const { ui, sessions, control, compaction } = this.rt.deps;
     control.begin();
     this.rt.budget.begin();
@@ -20,7 +21,12 @@ export class Orchestrator {
     ui.showingSession(session.id);
     const isFirstMessage = session.messageCount === 0;
     const promptId = sessions.generateRunId();
-    sessions.appendMessage(session.id, { role: 'user', content: userMessage, promptId, ...(images?.length ? { images } : {}) });
+    const asked = this.askedSkills(userMessage, skills);
+    sessions.appendMessage(session.id, {
+      role: 'user', content: userMessage, promptId,
+      ...(images?.length ? { images } : {}),
+      ...(asked.length ? { skills: asked } : {}),
+    });
     ui.liveRun.begin(session.id, sessions.readMessages(session.id).length);
     ui.say('agentState', { state: 'running' });
     // The webview already drew the user's bubble — tag it so a later
@@ -60,6 +66,13 @@ export class Orchestrator {
     const agent = AGENTS.find(a => a.id === agentId) || GENERAL_AGENT;
     ui.say('agentRouted', { agentId: agent.id, label: agent.label, icon: agent.icon, reasoning: route.reasoning });
     await this.rt.loop.run(agent, session, userMessage, { verify: true, promptId });
+  }
+
+  /** Skills picked with "/" plus any the message names outright. */
+  private askedSkills(userMessage: string, picked: unknown): string[] {
+    const ids = Array.isArray(picked) ? picked.filter((v): v is string => typeof v === 'string' && v.length > 0) : [];
+    const named = this.rt.deps.project.skillRouter?.mentionedIn(userMessage) ?? [];
+    return [...new Set([...ids, ...named])];
   }
 
   private nameSession(session: Session, userMessage: string): void {

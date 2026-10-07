@@ -41,6 +41,7 @@ export class AgentStepper {
     }
     scope.loopState.malformedCount = 0;
     scope.loopState.truncatedCount = 0;
+    scope.loopState.emptyCount = 0;
 
     const { results, images } = await this.runTools(scope, calls, stepLabel);
     if (streamed.toolCalls?.length) {

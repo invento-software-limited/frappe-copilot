@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.12.2] - 2026-10-07
+
+### Fixed
+
+- **Skills Picked With "/" Were Invisible and Bloated the History** — Choosing a skill from the "/" menu pasted its whole text (16 KB for `frappe-report-dashboard-builder`) into the message as hidden content: the user's bubble showed nothing, the Skills row didn't list it, every later turn resent it as history, and a reloaded chat showed the full text in the bubble. The message now carries just the skill id; the skill is loaded into the agent's instructions with a note to follow its workflow, listed in the Skills row as "you asked for it", shown as a 📎 chip on the message, and kept loaded for the rest of the session. Older messages with pasted skill text display as a chip too.
+- **Naming a Skill Didn't Load It** — Typing a skill's id in the message ("frappe-report-dashboard-builder use this skill", or `/frappe-report-dashboard-builder` inline) was ignored, since skills were only auto-picked by their descriptions. An exact id, as a whole word, now loads that skill like a "/" pick.
+- **A Run Could End With No Answer** — When the model replied with only hidden thinking (no text, no tool call), the run ended silently with nothing saved, leaving just "Worked for …". An empty reply is now nudged to continue (up to twice); after that the run stops with a visible note.
+
 ## [1.12.1] - 2026-10-07
 
 ### Fixed

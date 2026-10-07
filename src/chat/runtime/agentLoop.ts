@@ -1,4 +1,4 @@
-import { Session } from '../../types';
+import { Message, Session } from '../../types';
 import { AgentDefinition } from '../../agents/types';
 import { VerificationOutcome } from '../../agents/verification';
 import { writePlanFile, deriveTitle } from '../../agents/planStore';
@@ -31,7 +31,7 @@ export class AgentLoop {
 
     // Picked once per run so the system prompt stays byte-identical across
     // steps (prompt cache hits) and the model needn't spend a call on use_skill.
-    this.rt.skills.begin(userMessage);
+    this.rt.skills.begin(userMessage, requestedSkills(sessions.readMessages(session.id)));
     todos.bind(session);
     this.rt.prompts.todoContext = todos.tracker.carryOver();
     todos.tracker.beginRun();
@@ -140,4 +140,10 @@ export function summarize(lastText: string, done: boolean, verification: Verific
     summary += `\n\n${verification.missingTestNotes.map(n => `_${n}_`).join('\n')}`;
   }
   return summary;
+}
+
+/** Skills the user asked for anywhere in the session — they stay loaded for
+ *  every later turn, the way a "/" skill does in Claude Code. */
+function requestedSkills(messages: Message[]): string[] {
+  return [...new Set(messages.flatMap(m => (m.role === 'user' && m.skills) || []))];
 }

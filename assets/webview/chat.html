@@ -848,6 +848,8 @@ body{font-size:13px;}
 .skill-row-label{font-size:11px;color:var(--cl-muted);margin-right:2px;}
 .skill-chip{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid var(--cl-border);color:var(--cl-text);font-family:var(--vscode-editor-font-family,monospace);cursor:default;}
 .skill-chip.ref{color:var(--cl-muted);border-style:dashed;}
+.msg-skills{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;justify-content:flex-end;}
+.msg-skills .skill-chip{color:var(--cl-accent);}
 
 /* Effort picker */
 .effort-picker{position:relative;}
@@ -1258,11 +1260,25 @@ window.onerror = function(message, source, lineno, colno, error) {
 
   function stripDetailedMentions(content) {
     if (!content) return '';
-    var idx = content.indexOf('\n\n### Code Mention:');
-    if (idx !== -1) {
-      return content.substring(0, idx);
-    }
-    return content;
+    var cut = [content.indexOf('\n\n### Code Mention:'), content.indexOf('\n\n### Skill Applied:')]
+      .filter(function(i) { return i !== -1; });
+    return cut.length ? content.substring(0, Math.min.apply(null, cut)) : content;
+  }
+
+  /** Skills a user message asked for: its saved ids, or — for messages from
+   *  before skills were sent by id — the "### Skill Applied:" names pasted in. */
+  function messageSkills(msg) {
+    if (msg.skills && msg.skills.length) return msg.skills;
+    var names = [];
+    (msg.content || '').replace(/\n\n### Skill Applied: ([^\n]+)/g, function(_, n) { names.push(n.trim()); });
+    return names;
+  }
+
+  function skillChipsHtml(skills) {
+    if (!skills || !skills.length) return '';
+    return '<div class="msg-skills">' + skills.map(function(id) {
+      return '<span class="skill-chip" title="Skill you asked for">📎 ' + esc(id) + '</span>';
+    }).join('') + '</div>';
   }
 
   function parseAndRegisterMentions(content) {
@@ -1691,7 +1707,8 @@ window.onerror = function(message, source, lineno, colno, error) {
       runToggleHtml = '<div>' + promptRevertLinkHtml(meta.promptId) + '</div>';
     }
 
-    d.innerHTML='<div class="ln"></div><div class="dot '+dn+'"></div><div class="bub">'+contentHtml+runToggleHtml+'</div>';
+    var skillsHtml = r === 'user' && meta && meta.skills ? skillChipsHtml(meta.skills) : '';
+    d.innerHTML='<div class="ln"></div><div class="dot '+dn+'"></div><div class="bub">'+contentHtml+skillsHtml+runToggleHtml+'</div>';
     appendToChat(d);
     renderMermaid();
     flushCustomGraphs();
@@ -1986,8 +2003,9 @@ window.onerror = function(message, source, lineno, colno, error) {
     ip.innerHTML = '';
     updBtn();
     if (entry.isSkill) {
-      vs.postMessage({ type: 'getSkillContent', id: entry.cmd });
-      showSkillChip(entry.skillName || entry.cmd); // provisional label, replaced once content arrives
+      // Sent by id — the extension loads the skill into the agent's instructions.
+      attachedSkill = { id: entry.cmd, name: entry.skillName || entry.cmd };
+      showSkillChip(attachedSkill.name);
       return;
     }
     if (entry.cmd === 'clear') {
@@ -2147,10 +2165,9 @@ window.onerror = function(message, source, lineno, colno, error) {
       }).join('');
       llmText += details;
     }
-    if (attachedSkill) {
-      llmText += '\n\n### Skill Applied: ' + attachedSkill.name + '\n' + attachedSkill.content;
-      hideSkillChip();
-    }
+    var pickedSkills = attachedSkill ? [attachedSkill.id] : [];
+    if (attachedSkill) hideSkillChip();
+    if (!text && pickedSkills.length) text = llmText = 'Use the ' + pickedSkills[0] + ' skill.';
 
     showThinking();
     isSt = true;
@@ -2163,7 +2180,7 @@ window.onerror = function(message, source, lineno, colno, error) {
       var wasImage=attachedIsImage;
       var thumbSrc=wasImage?thumbEl.getAttribute('src'):null;
       clearAttachment();
-      addMsg('user',nm+(text?':\n'+text:''));
+      addMsg('user',nm+(text?':\n'+text:''),{ skills: pickedSkills });
       // Echo the image back in the user's own bubble, so the conversation still
       // reads correctly on scroll-back instead of just naming a file.
       if(wasImage&&thumbSrc){
@@ -2178,11 +2195,11 @@ window.onerror = function(message, source, lineno, colno, error) {
         }
       }
       var r=new FileReader();
-      r.onload=function(ev){vs.postMessage({type:'sendWithFile',text:llmText,fileName:f.name,fileType:f.name.split('.').pop().toLowerCase(),fileSize:f.size,data:ev.target.result.split(',')[1]});};
+      r.onload=function(ev){vs.postMessage({type:'sendWithFile',text:llmText,skills:pickedSkills,fileName:f.name,fileType:f.name.split('.').pop().toLowerCase(),fileSize:f.size,data:ev.target.result.split(',')[1]});};
       r.readAsDataURL(f);
     } else {
-      addMsg('user',text);
-      vs.postMessage({type:'sendMessage',text:llmText});
+      addMsg('user',text,{ skills: pickedSkills });
+      vs.postMessage({type:'sendMessage',text:llmText,skills:pickedSkills});
     }
   }
   ip.addEventListener('keydown',function(e){
@@ -3254,10 +3271,6 @@ window.onerror = function(message, source, lineno, colno, error) {
         if (previewEl) { previewEl.innerHTML = '<span class="badge b-on">✅ Reverted ('+m.count+' file(s))</span>'; }
         break;
       case 'skillsList': AVAILABLE_SKILLS = m.skills || []; break;
-      case 'skillContent':
-        attachedSkill = { id: m.id, name: m.name, content: m.content };
-        showSkillChip(m.name);
-        break;
       case 'compactionOffered': showCompactionBanner(m); break;
       case 'compactionApplied': showCompactionApplied(m); break;
       case 'tokenUsage': updateTokenBadge(m); break;
@@ -3513,6 +3526,10 @@ window.onerror = function(message, source, lineno, colno, error) {
             var msgMeta = msg.runId
               ? { agentId: msg.agentId, runId: msg.runId, hasCheckpoint: msg.hasCheckpoint, steps: msg.steps }
               : (msg.role === 'user' && msg.promptHasCheckpoint ? { isPromptRevert: true, promptId: msg.promptId } : null);
+            if (msg.role === 'user') {
+              msgMeta = msgMeta || {};
+              msgMeta.skills = messageSkills(msg);
+            }
             if (msg.steps) renderSavedSteps(msg.steps);
             addMsg(msg.role, msg.content, msgMeta);
           });

@@ -9,7 +9,7 @@ export interface MessageTarget {
  *  always delivered, even while a run in another session is going. */
 const GLOBAL_EVENTS: ReadonlySet<string> = new Set([
   'loadSession', 'status', 'benchStatus', 'modelsList', 'effortInfo', 'settingsLoaded', 'apiKeyStatus',
-  'approvalMode', 'skillsList', 'skillContent', 'insertCodeMention', 'claudeOAuthStarted', 'reviewState',
+  'approvalMode', 'skillsList', 'insertCodeMention', 'claudeOAuthStarted', 'reviewState',
 ]);
 
 /** The one channel every chat event goes through: it fans each message out to

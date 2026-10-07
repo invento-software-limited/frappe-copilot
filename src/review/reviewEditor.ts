@@ -160,3 +160,15 @@ export async function openDiff(review: ReviewController, rel: string): Promise<v
   const before = vscode.Uri.from({ scheme: BASELINE_SCHEME, path: '/' + rel });
   await vscode.commands.executeCommand('vscode.diff', before, fileUri, `${rel} (agent changes)`);
 }
+
+/** The chat's review bar buttons; false when the message isn't one. */
+export async function handleReviewMessage(review: ReviewController, msg: { type: string; path?: string }): Promise<boolean> {
+  switch (msg.type) {
+    case 'reviewAcceptAll': review.acceptAll(); return true;
+    case 'reviewRejectAll': await confirmRejectAll(review); return true;
+    case 'reviewAcceptFile': if (msg.path) review.acceptFile(msg.path); return true;
+    case 'reviewRejectFile': if (msg.path) await review.rejectFile(msg.path); return true;
+    case 'reviewOpenDiff': if (msg.path) await openDiff(review, msg.path); return true;
+    default: return false;
+  }
+}

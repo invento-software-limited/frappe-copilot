@@ -20,7 +20,7 @@ import { buildRunSteps } from './runSteps';
 import { AgentRuntime } from './runtime/agentRuntime';
 import { RunControl } from './runtime/runControl';
 import { ReviewController } from '../review/reviewController';
-import { confirmRejectAll, openDiff } from '../review/reviewEditor';
+import { handleReviewMessage } from '../review/reviewEditor';
 
 /** The chat webview — in the Secondary Side Bar and/or an editor tab. It
  *  renders sessions and routes webview messages; the agent run itself lives
@@ -202,13 +202,12 @@ export class ChatPanel implements vscode.WebviewViewProvider {
     if (this.approvals.answer(msg)) return;
     if (await this.settings.handle(msg)) return;
     if (await this.reverts.handle(msg)) return;
-    if (await this.handleReview(msg)) return;
+    if (this.review && await handleReviewMessage(this.review, msg)) return;
     switch (msg.type) {
       case 'ready': return this.onReady();
-      case 'sendMessage': return this.send(msg.text);
+      case 'sendMessage': return this.send(msg.text, msg.skills);
       case 'sendWithFile': return this.sendWithFile(msg);
       case 'abort': return this.abort();
-      case 'getSkillContent': return this.sendSkillContent(msg.id);
       case 'openFile': return openFileLink(msg.uri);
       case 'saveFile': return saveDownload(msg);
       case 'newSession':
@@ -241,21 +240,6 @@ export class ChatPanel implements vscode.WebviewViewProvider {
     this.ui.say('reviewState', { files: this.review?.pending() ?? [] });
   }
 
-  /** Review bar buttons; false when the message isn't one. */
-  private async handleReview(msg: any): Promise<boolean> {
-    const review = this.review;
-    if (!review || !String(msg.type).startsWith('review')) return false;
-    switch (msg.type) {
-      case 'reviewAcceptAll': review.acceptAll(); break;
-      case 'reviewRejectAll': await confirmRejectAll(review); break;
-      case 'reviewAcceptFile': review.acceptFile(msg.path); break;
-      case 'reviewRejectFile': await review.rejectFile(msg.path); break;
-      case 'reviewOpenDiff': await openDiff(review, msg.path); break;
-      default: return false;
-    }
-    return true;
-  }
-
   /** Checks the run can start; reports why not otherwise. */
   private async canStartRun(): Promise<boolean> {
     if (!(await this.settings.hasApiKey())) {
@@ -269,8 +253,8 @@ export class ChatPanel implements vscode.WebviewViewProvider {
     return true;
   }
 
-  private async send(text: string): Promise<void> {
-    if (await this.canStartRun()) await this.runtime.orchestrator.run(text);
+  private async send(text: string, skills: unknown): Promise<void> {
+    if (await this.canStartRun()) await this.runtime.orchestrator.run(text, undefined, skills);
   }
 
   private async sendWithFile(msg: any): Promise<void> {
@@ -281,7 +265,7 @@ export class ChatPanel implements vscode.WebviewViewProvider {
       return;
     }
     const prepared = await prepareAttachment(msg, path.join(fp, 'uploads'), this.provider, this.models.selectedModel || undefined, this.ui);
-    if (prepared) await this.runtime.orchestrator.run(prepared.message, prepared.images);
+    if (prepared) await this.runtime.orchestrator.run(prepared.message, prepared.images, msg.skills);
   }
 
   private abort(): void {
@@ -291,14 +275,6 @@ export class ChatPanel implements vscode.WebviewViewProvider {
     this.toolExecutor.killRunningCommands();
   }
 
-  private sendSkillContent(id: string): void {
-    const store = this.project.skillsStore;
-    if (!store || !id) return;
-    const content = store.readSkill(id);
-    if (!content) return;
-    const skill = store.listSkills().find(s => s.id === id);
-    this.ui.say('skillContent', { id, name: skill?.name || id, content });
-  }
 
   private async runSlashCommand(command: string): Promise<void> {
     if (command === 'compact') {

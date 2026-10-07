@@ -7,6 +7,8 @@ export interface SkillPick {
   name: string;
   reason: string;
   content: string;
+  /** The user asked for this skill (picked with "/" or named it). */
+  requested?: boolean;
 }
 
 /** Skills the agent has loaded or been pointed at during one run. */
@@ -31,11 +33,12 @@ export class SkillRouter {
   constructor(private store: SkillsStore) {}
 
   /** Skills to preload for a request, most specific first, within a size budget. */
-  selectForRequest(message: string): SkillPick[] {
+  selectForRequest(message: string, requested: string[] = []): SkillPick[] {
     const available = new Map(this.store.listSkills().map(s => [s.id, s]));
+    const asked = [...new Set([...requested, ...this.mentionedIn(message)])].filter(id => available.has(id));
     const chosen: { id: string; reason: string }[] = [];
     const add = (id: string, reason: string) => {
-      if (available.has(id) && !chosen.some(c => c.id === id)) chosen.push({ id, reason });
+      if (available.has(id) && !chosen.some(c => c.id === id) && !asked.includes(id)) chosen.push({ id, reason });
     };
 
     for (const rule of SKILL_RULES) {
@@ -49,11 +52,21 @@ export class SkillRouter {
       for (const rule of SKILL_RULES) if (rule.withCodeChanges) add(rule.id, 'request changes code');
     }
 
-    const ids = new Set(chosen.map(c => c.id));
+    const ids = new Set([...asked, ...chosen.map(c => c.id)]);
     const kept = chosen
       .filter(c => !(this.rules.get(c.id)?.yieldsTo || []).some(other => ids.has(other)))
-      .slice(0, MAX_SKILLS);
-    return this.loadWithReferences(kept, message, available);
+      .slice(0, Math.max(0, MAX_SKILLS - asked.length));
+    const askedPicks = asked.map(id => ({ id, reason: 'you asked for it', requested: true }));
+    return this.loadWithReferences([...askedPicks, ...kept], message, available);
+  }
+
+  /** Skill ids the message names outright — "use frappe-report-dashboard-builder"
+   *  or "/frappe-report-dashboard-builder" — matched as whole words. */
+  mentionedIn(message: string): string[] {
+    const text = message.toLowerCase();
+    return this.store.listSkills()
+      .map(s => s.id)
+      .filter(id => id.length >= 4 && new RegExp(`(^|[^\\w-])/?${escapeRegExp(id.toLowerCase())}($|[^\\w-])`).test(text));
   }
 
   /** Called after every tool call. Returns a one-line hint to append to the
@@ -81,22 +94,23 @@ export class SkillRouter {
   }
 
   private loadWithReferences(
-    picks: { id: string; reason: string }[],
+    picks: { id: string; reason: string; requested?: boolean }[],
     message: string,
     available: Map<string, { name: string }>
   ): SkillPick[] {
     const out: SkillPick[] = [];
     let budget = MAX_CONTEXT_CHARS;
-    const take = (id: string, name: string, reason: string, raw: string | null) => {
-      if (!raw || raw.startsWith('Error:') || raw.length > budget) return false;
-      budget -= raw.length;
-      out.push({ id, name, reason, content: raw });
+    // A skill the user asked for always loads, even past the budget.
+    const take = (id: string, name: string, reason: string, raw: string | null, requested = false) => {
+      if (!raw || raw.startsWith('Error:') || (raw.length > budget && !requested)) return false;
+      budget = Math.max(0, budget - raw.length);
+      out.push({ id, name, reason, content: raw, ...(requested ? { requested } : {}) });
       return true;
     };
 
     for (const p of picks) {
       const name = available.get(p.id)?.name || p.id;
-      if (!take(p.id, name, p.reason, this.withAdapter(p.id, this.store.readSkill(p.id)))) continue;
+      if (!take(p.id, name, p.reason, this.withAdapter(p.id, this.store.readSkill(p.id)), p.requested)) continue;
       const refs = (this.rules.get(p.id)?.references || []).filter(r => r.triggers.test(message)).slice(0, MAX_REFS_PER_SKILL);
       for (const ref of refs) {
         const refId = `${p.id}/${ref.file}`;
@@ -146,6 +160,10 @@ export class SkillRouter {
   private exists(id: string): boolean {
     return this.store.listSkills().some(s => s.id === id);
   }
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function capitalize(s: string): string {

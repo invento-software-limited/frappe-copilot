@@ -15,10 +15,10 @@ export class RunSkills {
 
   /** Preloads the skills (and relevant reference files) this request needs
    *  and announces each in the chat. */
-  begin(userMessage: string): void {
+  begin(userMessage: string, requested: string[] = []): void {
     this.state = new RunSkillState();
     this.preloaded = new Set();
-    this.context = this.pick(userMessage);
+    this.context = this.pick(userMessage, requested);
   }
 
   /** Catalog section for the system prompt, or '' with no skills library. */
@@ -40,11 +40,11 @@ export class RunSkills {
     return extra + (this.router?.observe({ tool, args, success }, this.state) || '');
   }
 
-  private pick(userMessage: string): string {
+  private pick(userMessage: string, requested: string[]): string {
     if (!this.router) return '';
     let picked: SkillPick[] = [];
     try {
-      picked = this.router.selectForRequest(userMessage);
+      picked = this.router.selectForRequest(userMessage, requested);
     } catch (e) {
       console.error('Auto skill selection failed:', e);
       return '';
@@ -52,10 +52,14 @@ export class RunSkills {
     if (picked.length === 0) return '';
     for (const s of picked) {
       this.state.loaded.add(s.id);
-      this.ui.say('skillEvent', { kind: 'loaded', id: s.id, name: s.name, auto: true, reason: s.reason });
+      this.ui.say('skillEvent', { kind: 'loaded', id: s.id, name: s.name, auto: !s.requested, reason: s.reason });
     }
     this.preloaded = new Set(this.state.loaded);
-    return `\n\n### Auto-Loaded Skills\nSelected for this request — treat them as authoritative for the topics they cover, and don't load them again with use_skill:\n\n` +
+    const asked = picked.filter(s => s.requested).map(s => s.id);
+    const askedNote = asked.length
+      ? `The user explicitly asked you to use ${asked.map(id => `'${id}'`).join(', ')} — follow its workflow and instructions for this task.\n`
+      : '';
+    return `\n\n### Auto-Loaded Skills\n${askedNote}Selected for this request — treat them as authoritative for the topics they cover, and don't load them again with use_skill:\n\n` +
       picked.map(s => `--- [${s.id.includes('/') ? 'Skill reference' : 'Skill'}: ${s.id}] (${s.reason}) ---\n${s.content}`).join('\n\n');
   }
 }

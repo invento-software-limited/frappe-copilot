@@ -79,6 +79,9 @@ export interface Message {
   staticPrefixLength?: number;
   /** Images attached to a user message, for vision-capable providers. */
   images?: ImageAttachment[];
+  /** User message: skills the user picked with "/" — loaded for this run and
+   *  the rest of the session. */
+  skills?: string[];
   /** Set on the summary message a task-specialized agent leaves in the main
    *  transcript — lets the UI show which specialist handled the turn and
    *  fetch its full step-by-step run via `runId` (see SessionStore.readRunTranscript). */

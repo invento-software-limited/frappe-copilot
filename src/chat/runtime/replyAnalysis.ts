@@ -10,8 +10,12 @@ export const MAX_CONSECUTIVE_MALFORMED_TOOL_CALLS = 5;
 /** A reply cut off at the output-token ceiling is re-prompted, but a
  *  model/config that always gets cut off gives up after this many in a row. */
 export const MAX_CONSECUTIVE_TRUNCATIONS = 5;
+/** A reply with no text and no tool call (e.g. only hidden thinking) is
+ *  nudged this many times before the run stops and says so. */
+export const MAX_CONSECUTIVE_EMPTY_REPLIES = 2;
 
 const TRUNCATION_NUDGE = 'Your previous response was cut off by the output length limit before finishing, so any tool call in it was NOT executed. Continue from where you left off; if you were writing a large file, split it into smaller write_file/edit_file calls.';
+const EMPTY_NUDGE = 'Your last reply was empty — no text and no tool call reached the user. Continue the task: call the next tool you need, or write your answer.';
 const MALFORMED_NUDGE = 'Your previous response used an invalid tool-call format (garbled tag, invented tag name such as <tool_check>, or a missing name attribute) and was NOT executed. You must use exactly this format, with no other function-calling syntax, tokens, or extra characters: <tool_call name="TOOL_NAME"><param_name>value</param_name></tool_call> — the literal tag is `tool_call` and the `name` attribute is required. Write it in your visible reply, not inside your reasoning. Retry the tool call now in that exact format.';
 
 /** Parses XML-protocol tool calls from the reply. With extended thinking on,
@@ -61,6 +65,22 @@ export function handleNoToolCalls(
     return { done: false, assistantText: fullContent, stopLoop: false };
   }
   loopState.truncatedCount = 0;
+
+  // Only hidden thinking (or nothing) came back — ending here would leave
+  // the user with a run that silently produced no answer.
+  if (!fullContent.trim()) {
+    loopState.emptyCount++;
+    if (loopState.emptyCount > MAX_CONSECUTIVE_EMPTY_REPLIES) {
+      return {
+        done: true,
+        stopLoop: true,
+        assistantText: `_(Stopped: the model returned an empty reply ${loopState.emptyCount} times in a row. Try sending the request again, or switch models.)_`,
+      };
+    }
+    localHistory.push({ role: 'user', content: EMPTY_NUDGE });
+    return { done: false, assistantText: '', stopLoop: false };
+  }
+  loopState.emptyCount = 0;
 
   // A model can drift into another invocation syntax (<invoke>/<parameter>,
   // stray "DSML" tokens, invented tags like <tool_check>). Accepting that as
