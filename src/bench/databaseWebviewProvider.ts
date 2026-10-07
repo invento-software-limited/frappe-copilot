@@ -473,12 +473,12 @@ function parsePythonList(raw: string): string[] {
 }
 
 function parsePythonDictList(raw: string): any[] {
-  let s = raw.trim();
+  const s = raw.trim();
   try {
     return JSON.parse(s);
   } catch {
     try {
-      let jsonStr = s
+      const jsonStr = s
         .replace(/'/g, '"')
         .replace(/None/g, 'null')
         .replace(/True/g, 'true')

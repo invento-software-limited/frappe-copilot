@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { AgentGraph, GraphNode, GraphNodeStatus, GraphState } from '../types';
+import { AgentGraph, GraphNode, GraphState } from '../types';
 
 const GRAPH_FILE = 'graph.json';
 

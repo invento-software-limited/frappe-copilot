@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { SkillsStore, SkillMeta } from './skillsStore';
+import { SkillsStore } from './skillsStore';
 
 /**
  * WebviewViewProvider for the "Skills" library view in the sidebar.

@@ -173,10 +173,21 @@ When you send a message, the AI can autonomously invoke the following tools in a
 | `update_todo_list` | Create/update a visual todo list | ❌ No |
 | `web_search` | Search the web via DuckDuckGo | ❌ No |
 | `web_fetch` | Fetch and clean text from a URL | ❌ No |
+| `browser` | Drive a real Chrome window: navigate, read the page outline, scroll, tabs, screenshot | ❌ No |
+| `browser_action` | Click, type, select, press keys, or run JS on the open page | ✅ Yes |
 | `call_mcp_tool` | Call a tool exposed by a connected MCP server | ❌ No |
 
 After every `write_file` or `edit_file`, the agent automatically runs syntax validation
 (`python -m py_compile` for `.py`, `node -c` for `.js`) and reports any compilation errors.
+
+## Reviewing Agent Changes
+
+Every file the agent edits is tracked for review — its edits land on disk right away (so migrations and tests run against them), and you decide afterwards what to keep:
+
+- **Review bar** above the chat input lists each changed file with `+added -removed` lines. Click a file to open a before/after diff; hover it for ✓ accept / ✕ reject. **Accept all** keeps everything; **Reject all** restores every file to how it was before the agent touched it (files the agent created are deleted).
+- **In the editor**, each change gets green highlights (added lines), a red marker with the removed text on hover, and **Accept / Reject** CodeLens buttons. With the cursor in a change: `Alt+Enter` accepts it, `Shift+Alt+Backspace` rejects it. A file-level lens offers Accept file / Reject file / Open diff.
+- Pending reviews survive a reload (`.frappe-copilot/review.json`) and accumulate across runs — the baseline is always what the file looked like when you last accepted it.
+- Turn it off with `frappe-copilot.reviewChanges`. Only file-edit tools are tracked (`write_file`, `edit_file`, `multi_edit`), not files changed by shell commands.
 
 ## Workspace Structure
 

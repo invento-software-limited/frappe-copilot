@@ -4,6 +4,35 @@ import { Message, Session, CompactionState, CheckpointEntry } from '../types';
 
 const SESSIONS_DIR = 'sessions';
 
+/** Logs a failed read/write instead of failing silently — the caller still
+ *  degrades gracefully, but the cause is visible in the extension log. */
+function warn(action: string, file: string, e: unknown): void {
+  console.warn(`[frappe-copilot] ${action} failed for ${file}:`, e instanceof Error ? e.message : e);
+}
+
+/** Reads a JSON-lines file, skipping (and logging) any corrupt line — one bad
+ *  line from an interrupted write must not hide the rest of the history. */
+function readJsonl<T>(file: string): T[] {
+  let content: string;
+  try {
+    content = fs.readFileSync(file, 'utf-8').trim();
+  } catch (e) {
+    warn('read', file, e);
+    return [];
+  }
+  if (!content) return [];
+  const rows: T[] = [];
+  content.split('\n').forEach((line, i) => {
+    if (!line.trim()) return;
+    try {
+      rows.push(JSON.parse(line) as T);
+    } catch {
+      console.warn(`[frappe-copilot] skipped corrupt line ${i + 1} in ${file}`);
+    }
+  });
+  return rows;
+}
+
 /** File-based session persistence. All data stored in .frappe-copilot/sessions/. */
 export class SessionStore {
   constructor(private frappeCopilotPath: string) {}
@@ -60,8 +89,8 @@ export class SessionStore {
           updatedAt: stat.mtime.toISOString(),
           messageCount,
         });
-      } catch {
-        // Skip malformed sessions
+      } catch (e) {
+        warn('load session', sessionDir, e);
         continue;
       }
     }
@@ -104,7 +133,8 @@ export class SessionStore {
     try {
       fs.rmSync(sessionDir, { recursive: true, force: true });
       return true;
-    } catch {
+    } catch (e) {
+      warn('delete', sessionDir, e);
       return false;
     }
   }
@@ -122,8 +152,8 @@ export class SessionStore {
         fs.writeFileSync(contextPath, lines.join('\n'));
         return true;
       }
-    } catch {
-      // fall through
+    } catch (e) {
+      warn('rename', contextPath, e);
     }
     return false;
   }
@@ -149,7 +179,8 @@ export class SessionStore {
       const line = JSON.stringify(message) + '\n';
       fs.appendFileSync(msgPath, line, 'utf-8');
       return true;
-    } catch {
+    } catch (e) {
+      warn('append message', msgPath, e);
       return false;
     }
   }
@@ -158,15 +189,7 @@ export class SessionStore {
   readMessages(sessionId: string): Message[] {
     const msgPath = this.messagesPath(sessionId);
     if (!fs.existsSync(msgPath)) return [];
-
-    try {
-      const content = fs.readFileSync(msgPath, 'utf-8').trim();
-      if (!content) return [];
-
-      return content.split('\n').map((line) => JSON.parse(line) as Message);
-    } catch {
-      return [];
-    }
+    return readJsonl<Message>(msgPath);
   }
 
   /** Read the context markdown for a session. */
@@ -175,7 +198,8 @@ export class SessionStore {
     if (!fs.existsSync(ctxPath)) return null;
     try {
       return fs.readFileSync(ctxPath, 'utf-8');
-    } catch {
+    } catch (e) {
+      warn('read context', ctxPath, e);
       return null;
     }
   }
@@ -199,7 +223,8 @@ export class SessionStore {
       const lines = entries.map(e => JSON.stringify(e)).join('\n') + '\n';
       fs.writeFileSync(path.join(runsDir, `${runId}.jsonl`), lines, 'utf-8');
       return true;
-    } catch {
+    } catch (e) {
+      warn('write run transcript', runsDir, e);
       return false;
     }
   }
@@ -208,13 +233,7 @@ export class SessionStore {
   readRunTranscript(sessionId: string, runId: string): Message[] {
     const runPath = path.join(this.sessionsDir, sessionId, 'runs', `${runId}.jsonl`);
     if (!fs.existsSync(runPath)) return [];
-    try {
-      const content = fs.readFileSync(runPath, 'utf-8').trim();
-      if (!content) return [];
-      return content.split('\n').map(line => JSON.parse(line) as Message);
-    } catch {
-      return [];
-    }
+    return readJsonl<Message>(runPath);
   }
 
   // ─── Compaction state ─────────────────────────────────────────────────────
@@ -228,7 +247,8 @@ export class SessionStore {
     try {
       fs.writeFileSync(this.compactionPath(sessionId), JSON.stringify(state, null, 2), 'utf-8');
       return true;
-    } catch {
+    } catch (e) {
+      warn('write compaction state', this.compactionPath(sessionId), e);
       return false;
     }
   }
@@ -238,7 +258,8 @@ export class SessionStore {
     if (!fs.existsSync(p)) return null;
     try {
       return JSON.parse(fs.readFileSync(p, 'utf-8')) as CompactionState;
-    } catch {
+    } catch (e) {
+      warn('read compaction state', p, e);
       return null;
     }
   }
@@ -256,7 +277,8 @@ export class SessionStore {
       fs.mkdirSync(runsDir, { recursive: true });
       fs.writeFileSync(this.checkpointPath(sessionId, runId), JSON.stringify(entries, null, 2), 'utf-8');
       return true;
-    } catch {
+    } catch (e) {
+      warn('write checkpoint', this.checkpointPath(sessionId, runId), e);
       return false;
     }
   }
@@ -266,7 +288,8 @@ export class SessionStore {
     if (!fs.existsSync(p)) return [];
     try {
       return JSON.parse(fs.readFileSync(p, 'utf-8')) as CheckpointEntry[];
-    } catch {
+    } catch (e) {
+      warn('read checkpoint', p, e);
       return [];
     }
   }
@@ -287,7 +310,8 @@ export class SessionStore {
         : content;
       fs.writeFileSync(ctxPath, newContent, 'utf-8');
       return true;
-    } catch {
+    } catch (e) {
+      warn('update context', ctxPath, e);
       return false;
     }
   }

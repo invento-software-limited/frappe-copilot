@@ -8,9 +8,10 @@
 .claude/**
 .frappe-copilot/**
 src/**
+out/test/**
 tsconfig.json
 package-lock.json
-pdf-test.mjs
+eslint.config.mjs
 CHANGELOG.md
 Initial-idea.md
 README.md

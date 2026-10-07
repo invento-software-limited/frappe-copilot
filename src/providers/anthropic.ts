@@ -353,7 +353,7 @@ export class AnthropicProvider implements LLMProvider {
       let errorObj: any;
       try {
         errorObj = JSON.parse(errorText);
-      } catch {}
+      } catch { /* error body isn't JSON — use the raw text */ }
 
       const errorMessage = errorObj?.error?.message || errorText;
       const errorType = errorObj?.error?.type;
@@ -493,7 +493,7 @@ export class AnthropicProvider implements LLMProvider {
         let errorObj: any;
         try {
           errorObj = JSON.parse(errorText);
-        } catch {}
+        } catch { /* error body isn't JSON — use the raw text */ }
 
         const errorMessage = errorObj?.error?.message || errorText;
         if (body.context_management && /context[_-]management|clear_tool_uses/i.test(errorMessage)) {
@@ -520,7 +520,7 @@ export class AnthropicProvider implements LLMProvider {
         let errorObj: any;
         try {
           errorObj = JSON.parse(errorText);
-        } catch {}
+        } catch { /* error body isn't JSON — use the raw text */ }
 
         const errorMessage = errorObj?.error?.message || errorText;
         const errorType = errorObj?.error?.type;

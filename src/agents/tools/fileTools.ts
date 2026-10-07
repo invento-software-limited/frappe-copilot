@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ToolResult, ok, fail } from './result';
 import { asBool, asInt, asJson, asString } from './args';
+import { imageAttachment, imageMediaType } from './images';
 
 const DEFAULT_READ_LINES = 2000;
 const MAX_LINE_CHARS = 2000;
@@ -32,6 +33,7 @@ export class FileTools {
     if (stat.isDirectory()) return fail(`'${rel}' is a directory. Use list_dir or glob instead.`);
     if (stat.size > MAX_READ_BYTES) return fail(`File '${rel}' is ${(stat.size / 1048576).toFixed(1)}MB — too large. Use grep_search to locate the relevant section.`);
 
+    if (imageMediaType(abs)) return this.readImage(abs, rel);
     const text = fs.readFileSync(abs, 'utf8');
     if (text.includes('\0')) return fail(`'${rel}' looks like a binary file.`);
     this.markSeen(abs);
@@ -40,6 +42,13 @@ export class FileTools {
     const offset = Math.max(1, asInt(args.offset) ?? 1);
     const limit = Math.max(1, asInt(args.limit) ?? DEFAULT_READ_LINES);
     return ok(numberLines(text.split('\n'), offset, limit, rel));
+  }
+
+  /** Image files come back as an attachment the model can look at. */
+  private readImage(abs: string, rel: string): ToolResult {
+    const { image, problem } = imageAttachment(abs);
+    if (!image) return fail(`Can't show '${rel}': ${problem}.`);
+    return ok(`Image '${rel}' is attached below.`, [image]);
   }
 
   async write(args: Record<string, any>): Promise<ToolResult> {

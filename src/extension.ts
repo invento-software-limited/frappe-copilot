@@ -1,12 +1,15 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { DynamicProvider } from './providers/dynamic';
-import { BenchDetector } from './bench/detector';
 import { BenchExecutor } from './bench/executor';
 import { BENCH_COMMANDS, resolveCommand, getCommandById } from './bench/commands';
-import { initializeWorkspaceStructure, getFrappeCopilotPath, readConfig, updateBenchConfig, isBenchConfigured, setupBenchWizard, writeConfig } from './workspace/structure';
+import { initializeWorkspaceStructure, readConfig, isBenchConfigured, setupBenchWizard, writeConfig } from './workspace/structure';
 import { SessionManager } from './session/manager';
 import { ChatPanel } from './chat/panel';
+import { ReviewController } from './review/reviewController';
+import { ReviewStore } from './review/reviewStore';
+import { registerReview } from './review/reviewEditor';
+import { setWebSearchSecrets, storeWebSearchApiKey } from './agents/tools/webSearch';
 import { BenchEnvironment, BenchCommand } from './types';
 import { SkillsStore } from './agents/skillsStore';
 import { SkillsWebviewProvider } from './agents/skillsWebviewProvider';
@@ -22,7 +25,6 @@ export const logChannel = vscode.window.createOutputChannel('Frappe Copilot');
 // ─── Global state ─────────────────────────────────────────────────────────────
 
 let provider: DynamicProvider;
-let benchDetector: BenchDetector;
 let benchExecutor: BenchExecutor | null = null;
 let sessionManager: SessionManager | null = null;
 let skillsStore: SkillsStore | null = null;
@@ -33,6 +35,7 @@ let playgroundProvider: PlaygroundProvider | null = null;
 let mcpManager: MCPManager | null = null;
 let mcpWebviewProvider: MCPWebviewProvider | null = null;
 let chatPanel: ChatPanel | null = null;
+let review: ReviewController | null = null;
 let benchEnv: BenchEnvironment | null = null;
 let statusBarItem: vscode.StatusBarItem;
 let extensionPath: string = '';
@@ -46,9 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Initialize provider with SecretStorage for API key
   provider = new DynamicProvider(context.secrets);
-
-  // Create bench detector
-  benchDetector = new BenchDetector();
+  setWebSearchSecrets(context.secrets);
 
   // Store extension path for later use (e.g., loading webview content)
   extensionPath = context.extensionPath;
@@ -57,6 +58,7 @@ export function activate(context: vscode.ExtensionContext) {
   const frappeCopilotPath = initializeWorkspaceStructure();
   if (frappeCopilotPath) {
     sessionManager = new SessionManager(frappeCopilotPath);
+    ensureReview(frappeCopilotPath);
     skillsStore = new SkillsStore(frappeCopilotPath, path.join(extensionPath, 'assets', 'skills'));
     skillsStore.migrateLegacyMemoryIfNeeded();
     skillsWebviewProvider = new SkillsWebviewProvider(context.extensionUri, skillsStore);
@@ -142,7 +144,8 @@ export function activate(context: vscode.ExtensionContext) {
       provider,
       sessionManager,
       benchEnv,
-      mcpManager
+      mcpManager,
+      review
     );
     context.subscriptions.push(
       vscode.window.registerWebviewViewProvider(
@@ -196,6 +199,19 @@ function registerCommands(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.commands.registerCommand('frappe-copilot.setupApiKey', () => {
       runApiKeySetup();
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.setWebSearchApiKey', async () => {
+      const key = await vscode.window.showInputBox({
+        prompt: 'API key for web search (Brave Search or Tavily — pick the service in frappe-copilot.webSearch.provider). Leave empty to remove it.',
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (key === undefined) return;
+      await storeWebSearchApiKey(key.trim());
+      vscode.window.showInformationMessage(key.trim() ? 'Frappe Copilot: web search API key saved.' : 'Frappe Copilot: web search API key removed.');
     })
   );
 
@@ -382,6 +398,14 @@ async function runApiKeySetup(): Promise<void> {
 
 // ─── Core Actions ────────────────────────────────────────────────────────────
 
+/** Starts accept/reject review of agent edits for this workspace (once). */
+function ensureReview(frappeCopilotPath: string): void {
+  const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (review || !root) return;
+  review = new ReviewController(root, new ReviewStore(path.join(frappeCopilotPath, 'review.json')));
+  registerReview(extensionContext, review);
+}
+
 /** Open the chat panel — runs initial setup first if needed.
  *  By default opens/toggles in the Secondary Side Bar (agent panel), replacing Antigravity agent panel.
  *  If inTab is true, opens as an editor tab in ViewColumn.Two.
@@ -396,6 +420,7 @@ async function openChat(inTab: boolean = false) {
       return;
     }
     sessionManager = new SessionManager(frappeCopilotPath);
+    ensureReview(frappeCopilotPath);
     vscode.window.registerTreeDataProvider(
       'frappe-copilot.sessions',
       sessionManager
@@ -415,7 +440,8 @@ async function openChat(inTab: boolean = false) {
       provider,
       sessionManager,
       benchEnv,
-      mcpManager
+      mcpManager,
+      review
     );
     extensionContext?.subscriptions.push(
       vscode.window.registerWebviewViewProvider(
@@ -442,49 +468,6 @@ async function openChat(inTab: boolean = false) {
     await vscode.commands.executeCommand('frappe-copilot.agentChat.focus');
   } catch {
     chatPanel.show();
-  }
-}
-
-/** Detect bench environment and update all services. */
-async function detectBenchEnvironment(force: boolean = false): Promise<void> {
-  try {
-    updateStatusBar('detecting...');
-    const env = await benchDetector.detect({ force });
-
-    benchEnv = env;
-    updateStatusBar(env.type);
-
-    if (chatPanel) {
-      chatPanel.setBenchEnv(env);
-    }
-
-    if (env.type !== 'not-found') {
-      benchExecutor = new BenchExecutor(env);
-      updateBenchConfig(env);
-      databaseWebviewProvider?.refresh();
-    }
-
-    switch (env.type) {
-      case 'host':
-        vscode.window.showInformationMessage(
-          `Frappe Copilot: Bench detected on host at ${env.benchPath}`
-        );
-        break;
-      case 'docker':
-        vscode.window.showInformationMessage(
-          `Frappe Copilot: Bench detected in Docker container "${env.containerName}" (${env.containerId.slice(0, 12)})`
-        );
-        break;
-      case 'not-found':
-        vscode.window.showWarningMessage(
-          `Frappe Copilot: ${env.message}`
-        );
-        break;
-    }
-  } catch (error: any) {
-    vscode.window.showErrorMessage(
-      `Frappe Copilot: Bench detection failed — ${error.message}`
-    );
   }
 }
 

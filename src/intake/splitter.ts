@@ -59,7 +59,7 @@ function splitIntoChunks(text: string, sourceName: string): ContentChunk[] {
 
   while (startIndex < text.length) {
     // Find the end boundary for this chunk
-    let endIndex = startIndex + MAX_CHUNK_CHARS;
+    const endIndex = startIndex + MAX_CHUNK_CHARS;
 
     if (endIndex >= text.length) {
       // Last chunk — take the remainder

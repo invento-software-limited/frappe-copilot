@@ -33,6 +33,8 @@ export interface ToolResultBlock {
   name: string;
   content: string;
   isError?: boolean;
+  /** For a `task` call: the sub-agent run whose transcript produced this result. Never sent to a provider. */
+  subRunId?: string;
 }
 
 /** A reasoning block that must be echoed back verbatim alongside tool calls —
@@ -63,6 +65,8 @@ export interface Message {
   thinkingBlocks?: ThinkingBlock[];
   /** User turn: results answering the previous assistant turn's toolCalls. */
   toolResults?: ToolResultBlock[];
+  /** XML-protocol tool-result turn from a `task` call: the sub-agent run behind it. */
+  subRunId?: string;
   /** For a system message: length of the leading slice of `content` that is
    *  static per-agent boilerplate (identity, guidelines, tool docs) as opposed
    *  to per-turn dynamic context (RAG snippets, schema directory, skills/MCP

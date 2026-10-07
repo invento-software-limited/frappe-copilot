@@ -8,7 +8,8 @@ export type ToolName =
   | 'write_client_script' | 'write_server_script' | 'export_customizations'
   | 'write_builder_page' | 'call_mcp_tool' | 'scaffold_app' | 'scaffold_doctype'
   | 'glob' | 'multi_edit' | 'command_output' | 'kill_command'
-  | 'task' | 'search_knowledge' | 'list_doctypes';
+  | 'task' | 'search_knowledge' | 'list_doctypes'
+  | 'browser' | 'browser_action';
 
 export const ALL_TOOLS: ToolName[] = [
   'read_file', 'write_file', 'edit_file', 'list_dir', 'grep_search',
@@ -19,6 +20,7 @@ export const ALL_TOOLS: ToolName[] = [
   'write_builder_page', 'call_mcp_tool', 'scaffold_app', 'scaffold_doctype',
   'glob', 'multi_edit', 'command_output', 'kill_command',
   'task', 'search_knowledge', 'list_doctypes',
+  'browser', 'browser_action',
 ];
 
 /** Tools with no side effects — safe to run concurrently within one step. */

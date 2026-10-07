@@ -136,13 +136,13 @@ function parsePythonList(raw: string): string[] {
  * Parses python list of dicts representation e.g. [{'name': 'fieldname', 'type': 'varchar'}]
  */
 function parsePythonDictList(raw: string): any[] {
-  let s = raw.trim();
+  const s = raw.trim();
   try {
     return JSON.parse(s);
   } catch {
     try {
       // Replace python-specific literals to json standard
-      let jsonStr = s
+      const jsonStr = s
         .replace(/'/g, '"')
         .replace(/None/g, 'null')
         .replace(/True/g, 'true')

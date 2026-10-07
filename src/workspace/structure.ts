@@ -93,7 +93,8 @@ export function readConfig(): WorkspaceConfig | null {
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
     return JSON.parse(raw) as WorkspaceConfig;
-  } catch {
+  } catch (e) {
+    console.warn(`[frappe-copilot] Could not read ${configPath}:`, e instanceof Error ? e.message : e);
     return null;
   }
 }

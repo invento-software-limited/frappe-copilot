@@ -2,7 +2,7 @@
   "name": "frappe-copilot",
   "displayName": "Frappe Copilot",
   "description": "AI-powered Frappe/ERPNext development assistant. Integrates with OpenCode Zen for agentic code generation, bench management, and Frappe app scaffolding.",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/invento-software-limited/frappe-copilot.git"
@@ -49,6 +49,10 @@
         "title": "Frappe Copilot: Set API Key"
       },
       {
+        "command": "frappe-copilot.setWebSearchApiKey",
+        "title": "Frappe Copilot: Set Web Search API Key"
+      },
+      {
         "command": "frappe-copilot.newSession",
         "title": "Frappe Copilot: New Session",
         "icon": "$(add)"
@@ -84,6 +88,36 @@
       {
         "command": "frappe-copilot.refreshMcpServers",
         "title": "Frappe Copilot: Refresh MCP Servers"
+      },
+      {
+        "command": "frappe-copilot.review.acceptHunk",
+        "title": "Frappe Copilot: Accept Change",
+        "icon": "$(check)"
+      },
+      {
+        "command": "frappe-copilot.review.rejectHunk",
+        "title": "Frappe Copilot: Reject Change",
+        "icon": "$(close)"
+      },
+      {
+        "command": "frappe-copilot.review.acceptFile",
+        "title": "Frappe Copilot: Accept All Changes in File",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "frappe-copilot.review.rejectFile",
+        "title": "Frappe Copilot: Reject All Changes in File",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "frappe-copilot.review.acceptAll",
+        "title": "Frappe Copilot: Accept All Agent Changes",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "frappe-copilot.review.rejectAll",
+        "title": "Frappe Copilot: Reject All Agent Changes",
+        "icon": "$(discard)"
       }
     ],
     "viewsContainers": {
@@ -149,14 +183,84 @@
         "frappe-copilot.effort": {
           "type": "string",
           "default": "",
-          "enum": ["", "low", "medium", "high", "xhigh", "max"],
-          "enumDescriptions": ["Model default (recommended)", "Fastest, least thorough", "Balanced", "Thorough", "Extra thorough — best for hard coding tasks", "Maximum — slowest and most expensive"],
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "enumDescriptions": [
+            "Model default (recommended)",
+            "Fastest, least thorough",
+            "Balanced",
+            "Thorough",
+            "Extra thorough — best for hard coding tasks",
+            "Maximum — slowest and most expensive"
+          ],
           "description": "How much reasoning effort the model spends. Leave empty to use each model's default. Applies to Claude models with effort support and to OpenAI reasoning models (gpt-5, o-series); ignored for models without it."
+        },
+        "frappe-copilot.browser.executablePath": {
+          "type": "string",
+          "default": "",
+          "description": "Chrome/Chromium/Edge/Brave executable the agent's browser tool drives. Leave empty to auto-detect an installed one."
+        },
+        "frappe-copilot.browser.headless": {
+          "type": "boolean",
+          "default": false,
+          "description": "Run the agent's browser without a visible window. Keep it off to watch the agent and to log in to sites yourself (the login persists in ~/.frappe-copilot/browser-profile)."
+        },
+        "frappe-copilot.webSearch.provider": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "duckduckgo",
+            "brave",
+            "tavily",
+            "searxng"
+          ],
+          "enumDescriptions": [
+            "Brave/Tavily when an API key is set (Frappe Copilot: Set Web Search API Key, or BRAVE_API_KEY / TAVILY_API_KEY), otherwise DuckDuckGo.",
+            "DuckDuckGo's HTML page — no key, but it sometimes blocks automated searches.",
+            "Brave Search API (free tier available).",
+            "Tavily search API (free tier available).",
+            "Your own SearXNG instance (set frappe-copilot.webSearch.searxngUrl)."
+          ],
+          "description": "Which search service the agent's web_search tool uses."
+        },
+        "frappe-copilot.webSearch.searxngUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL of a SearXNG instance with the JSON format enabled, e.g. https://searx.example.com."
         },
         "frappe-copilot.nativeToolCalling": {
           "type": "boolean",
           "default": true,
           "description": "Use the provider's native function-calling API (Anthropic tool_use / OpenAI tool_calls) instead of the XML text protocol. Falls back to XML automatically if a model rejects tools."
+        },
+        "frappe-copilot.toolImages": {
+          "type": "boolean",
+          "default": true,
+          "description": "Let tools hand images to the model — browser screenshots and read_file on an image. Turned off automatically for a model that rejects images."
+        },
+        "frappe-copilot.reviewChanges": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track every file the agent edits for review: accept or reject its changes per hunk (CodeLens in the editor, Alt+Enter / Shift+Alt+Backspace), per file, or all at once from the bar above the chat input. Edits are applied right away either way; rejecting restores the file as it was before the agent touched it."
+        },
+        "frappe-copilot.runLimits.pauseAfterSteps": {
+          "type": "number",
+          "default": 100,
+          "minimum": 0,
+          "description": "Pause a request after this many agent steps and ask whether to continue (each Continue doubles the limit). 0 turns it off."
+        },
+        "frappe-copilot.runLimits.pauseAfterTokens": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Pause a request once it has used this many tokens (input + output, summed over every model call) and ask whether to continue. 0 turns it off."
         },
         "frappe-copilot.provider": {
           "type": "string",
@@ -355,6 +459,16 @@
         "key": "ctrl+alt+m",
         "mac": "cmd+alt+m",
         "when": "editorHasSelection"
+      },
+      {
+        "command": "frappe-copilot.review.acceptHunk",
+        "key": "alt+enter",
+        "when": "editorTextFocus && frappeCopilot.reviewPending"
+      },
+      {
+        "command": "frappe-copilot.review.rejectHunk",
+        "key": "shift+alt+backspace",
+        "when": "editorTextFocus && frappeCopilot.reviewPending"
       }
     ],
     "menus": {
@@ -413,16 +527,21 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src",
+    "test": "npm run compile && node --require ./out/test/support/setup.js --test \"out/test/**/*.test.js\"",
+    "test:only": "node --require ./out/test/support/setup.js --test \"out/test/**/*.test.js\""
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@types/adm-zip": "^0.5.8",
     "@types/diff": "^5.2.3",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.11.0",
     "@types/pngjs": "^6.0.5",
     "@types/vscode": "^1.85.0",
-    "typescript": "^5.3.0"
+    "eslint": "^9.39.5",
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.71.1"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.291",
@@ -431,6 +550,7 @@
     "diff": "^5.2.2",
     "js-yaml": "^5.2.2",
     "pdfjs-dist": "^4.0.379",
-    "pngjs": "^7.0.0"
+    "pngjs": "^7.0.0",
+    "puppeteer-core": "^25.12.0"
   }
 }

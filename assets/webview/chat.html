@@ -30,6 +30,7 @@ body{font-family:var(--vscode-font-family,-apple-system,sans-serif);font-size:va
 .revert-file-name{font-size:11px;font-family:var(--vscode-editor-font-family,monospace);color:var(--vscode-descriptionForeground,#888);margin-bottom:3px;word-break:break-all;}
 .run-steps{margin-top:6px;padding:8px 10px;border-left:2px solid var(--vscode-widget-border,#333);font-size:12px;display:none;}
 .run-steps.show{display:block;}
+.subrun-steps{margin:6px 0 2px;padding-left:10px;border-left:2px solid var(--vscode-widget-border,#333);}
 .run-step{margin-bottom:8px;}
 .run-step .run-step-label{font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--vscode-descriptionForeground,#888);margin-bottom:2px;}
 .verify-card{border:1px solid var(--vscode-widget-border,#333);border-radius:6px;padding:10px 12px;background:rgba(255,255,255,0.02);max-width:480px;}
@@ -869,6 +870,31 @@ body{font-size:13px;}
 #effort-btn.custom{color:var(--cl-text);}
 
 /* Task list dock */
+.review-dock{display:none;flex-direction:column;margin:0 0 8px;border:1px solid var(--cl-border);border-radius:12px;background:var(--cl-surface);overflow:hidden;font-size:12px;}
+.review-dock.show{display:flex;}
+.review-files{list-style:none;margin:0;padding:4px 0;max-height:180px;overflow-y:auto;border-bottom:1px solid var(--cl-border);}
+.review-dock.collapsed .review-files{display:none;}
+.review-file{display:flex;align-items:center;gap:8px;padding:3px 10px;cursor:pointer;min-width:0;}
+.review-file:hover{background:var(--cl-hover);}
+.review-stat{font-family:var(--vscode-editor-font-family,monospace);font-size:11px;flex-shrink:0;}
+.review-add{color:var(--vscode-gitDecoration-addedResourceForeground,#73c991);}
+.review-del{color:var(--vscode-gitDecoration-deletedResourceForeground,#e06c75);}
+.review-name{color:var(--cl-text);white-space:nowrap;}
+.review-dir{color:var(--cl-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1;}
+.review-new{color:var(--vscode-gitDecoration-addedResourceForeground,#73c991);font-size:10px;border:1px solid currentColor;border-radius:4px;padding:0 4px;flex-shrink:0;}
+.review-acts{display:none;gap:2px;flex-shrink:0;}
+.review-file:hover .review-acts,.review-file:focus-within .review-acts{display:flex;}
+.review-icon{background:transparent;border:none;color:var(--cl-muted);cursor:pointer;padding:1px 5px;border-radius:4px;font:inherit;}
+.review-icon:hover{background:var(--cl-raised);color:var(--cl-text);}
+.review-foot{display:flex;align-items:center;gap:8px;padding:5px 6px 5px 4px;}
+.review-toggle{display:flex;align-items:center;gap:6px;flex:1;background:transparent;border:none;color:var(--cl-text);font:inherit;cursor:pointer;padding:2px 6px;border-radius:6px;min-width:0;text-align:left;}
+.review-toggle:hover{background:var(--cl-hover);}
+.review-toggle .todo-chev{transition:transform .15s ease;}
+.review-dock.collapsed .review-toggle .todo-chev{transform:rotate(180deg);}
+.review-btn{background:transparent;border:1px solid transparent;color:var(--cl-muted);font:inherit;cursor:pointer;padding:3px 9px;border-radius:6px;}
+.review-btn:hover{color:var(--cl-text);background:var(--cl-hover);}
+.review-btn.primary{background:var(--vscode-button-background,#3b5bdb);color:var(--vscode-button-foreground,#fff);}
+.review-btn.primary:hover{background:var(--vscode-button-hoverBackground,#4c6ef5);}
 .todo-dock{display:none;flex-direction:column;margin:0 0 8px;border:1px solid var(--cl-border);border-radius:12px;background:var(--cl-surface);overflow:hidden;}
 .todo-dock.show{display:flex;}
 .todo-head{display:flex;align-items:center;gap:8px;padding:7px 10px;background:transparent;border:none;color:var(--cl-text);font:inherit;font-size:12px;cursor:pointer;text-align:left;min-width:0;}
@@ -1071,6 +1097,17 @@ window.onerror = function(message, source, lineno, colno, error) {
 <div id="atc"><img id="atc-thumb" alt="" style="display:none;"><span class="nm" id="fn"></span><button class="rm" id="rma">✕</button></div>
 <div id="skill-atc"><span class="nm" id="skill-atc-name"></span><button class="rm" id="skill-atc-rm">✕</button></div>
 <div id="bot">
+  <div id="review-dock" class="review-dock" aria-label="Agent changes to review">
+    <ul class="review-files" id="review-files"></ul>
+    <div class="review-foot">
+      <button class="review-toggle" id="review-toggle" aria-expanded="true" title="Show or hide the changed files">
+        <svg class="todo-chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 15l6-6 6 6"/></svg>
+        <span id="review-count"></span>
+      </button>
+      <button class="review-btn" id="review-reject-all" title="Undo every change the agent made to these files">Reject all</button>
+      <button class="review-btn primary" id="review-accept-all" title="Keep every change">Accept all</button>
+    </div>
+  </div>
   <div id="todo-dock" class="todo-dock">
     <button class="todo-head" id="todo-head" aria-expanded="true">
       <span class="todo-progress" id="todo-progress"></span>
@@ -1198,6 +1235,8 @@ window.onerror = function(message, source, lineno, colno, error) {
     introspect_doctype: { icon: '📊', title: 'Introspect DocType' },
     web_search: { icon: '🌐', title: 'Web Search' },
     web_fetch: { icon: '📥', title: 'Fetch Web Page' },
+    browser: { icon: '🧭', title: 'Browser' },
+    browser_action: { icon: '👆', title: 'Browser Action' },
     use_skill: { icon: '📎', title: 'Use Skill' },
     call_mcp_tool: { icon: '🔌', title: 'MCP Tool Call' }
   };
@@ -1294,6 +1333,7 @@ window.onerror = function(message, source, lineno, colno, error) {
           '<span class="think-timer" id="think-timer">' + fmtDur(Date.now() - runStartTime) + '</span>' +
           '<span class="think-phase" id="think-phase"></span>' +
           '<span class="think-retry" id="think-retry" style="display:none;"></span>' +
+          '<span class="think-phase" id="think-tokens"></span>' +
           '<span class="think-hint">esc to interrupt</span>' +
         '</div></div>';
       ch.appendChild(thinkEl);
@@ -1322,6 +1362,18 @@ window.onerror = function(message, source, lineno, colno, error) {
     if (retryCount !== undefined) { thinkRetryCount = retryCount; setRetry(retryCount); }
   }
 
+  /** Token totals of the run in flight, shown live and in the "Worked for" line. */
+  var runUsage = null;
+  function fmtTokens(n) { return n >= 1000 ? Math.round(n / 1000) + 'k' : String(n); }
+  function usageText(u) {
+    return u && u.calls ? '↑' + fmtTokens(u.promptTokens) + ' ↓' + fmtTokens(u.completionTokens) + ' tokens' : '';
+  }
+  function showRunUsage(m) {
+    runUsage = m;
+    var el = thinkEl && thinkEl.querySelector('#think-tokens');
+    if (el) el.textContent = usageText(m) ? '· ' + usageText(m) : '';
+  }
+
   /** Ends the run timer and leaves a "Worked for …" line under the reply. */
   function finishRunTimer() {
     if (!runStartTime) return;
@@ -1330,7 +1382,8 @@ window.onerror = function(message, source, lineno, colno, error) {
     if (elapsed < 1000) return;
     var done = document.createElement('div');
     done.className = 'run-done';
-    done.innerHTML = '<svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="#89b4fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M6 8h4l2-3 2 3h4"/><path d="M6 16h12"/><path d="M8 8v8"/><path d="M16 8v8"/><circle cx="6" cy="8" r="1.5" fill="#89b4fa"/><circle cx="18" cy="8" r="1.5" fill="#89b4fa"/><circle cx="6" cy="16" r="1.5" fill="#89b4fa"/><circle cx="18" cy="16" r="1.5" fill="#89b4fa"/><path d="M12 2l.5 1.5L14 4l-1.5.5L12 6l-.5-1.5L10 4l1.5-.5z" fill="#f9e2af" stroke="none"/></svg>Worked for ' + fmtDur(elapsed);
+    done.innerHTML = '<svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="#89b4fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M6 8h4l2-3 2 3h4"/><path d="M6 16h12"/><path d="M8 8v8"/><path d="M16 8v8"/><circle cx="6" cy="8" r="1.5" fill="#89b4fa"/><circle cx="18" cy="8" r="1.5" fill="#89b4fa"/><circle cx="6" cy="16" r="1.5" fill="#89b4fa"/><circle cx="18" cy="16" r="1.5" fill="#89b4fa"/><path d="M12 2l.5 1.5L14 4l-1.5.5L12 6l-.5-1.5L10 4l1.5-.5z" fill="#f9e2af" stroke="none"/></svg>Worked for ' + fmtDur(elapsed) + (usageText(runUsage) ? ' · ' + usageText(runUsage) : '');
+    runUsage = null;
     appendToChat(done);
   }
 
@@ -1625,7 +1678,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         ? ' <span class="run-toggle" data-revert-run-id="'+esc(meta.runId)+'">↩ Revert this run</span>'
         : '';
       runToggleHtml = '<div><span class="badge b-agent">'+esc(am.icon||'🤖')+' '+esc(am.label||meta.agentId)+'</span> ' +
-        '<span class="run-toggle" data-run-id="'+esc(meta.runId)+'">Show sub-agent steps ▸</span>' + revertHtml +
+        (meta.steps ? '' : '<span class="run-toggle" data-run-id="'+esc(meta.runId)+'">Show sub-agent steps ▸</span>') + revertHtml +
         '<div class="run-steps" id="run-steps-'+esc(meta.runId)+'"></div></div>';
     } else if (meta && meta.isPromptRevert) {
       runToggleHtml = '<div>' + promptRevertLinkHtml(meta.promptId) + '</div>';
@@ -1646,8 +1699,8 @@ window.onerror = function(message, source, lineno, colno, error) {
     }
 
     if (meta && meta.runId) {
-      var toggleEl = d.querySelector('.run-toggle');
-      toggleEl.addEventListener('click', function() {
+      var toggleEl = d.querySelector('[data-run-id]');
+      if (toggleEl) toggleEl.addEventListener('click', function() {
         var stepsEl = document.getElementById('run-steps-'+meta.runId);
         var show = stepsEl.classList.toggle('show');
         toggleEl.textContent = show ? 'Hide sub-agent steps ▾' : 'Show sub-agent steps ▸';
@@ -1778,6 +1831,75 @@ window.onerror = function(message, source, lineno, colno, error) {
       }
       stepsEl.appendChild(step);
     });
+  }
+
+  /** Forgets in-flight stream/tool/thinking state when the chat is rebuilt. */
+  function resetLiveState() {
+    thinkEl = null;
+    runStartTime = 0;
+    toolCards = {};
+    curToolCard = null;
+    curToolStreamed = false;
+    streamStates = {};
+    seThought = null; seContent = null; seRawText = ''; seRawThought = '';
+    curVerifyCard = null; curVerifyRunId = null;
+  }
+
+  /** Re-runs the events of a run still in flight, so a chat reopened mid-run
+   *  shows everything streamed so far and keeps streaming from there. */
+  var replaying = false;
+  function replayLive(live) {
+    runStartTime = live.startedAt || 0;
+    replaying = true;
+    try { (live.events || []).forEach(onHostMessage); } finally { replaying = false; }
+    stickScroll();
+  }
+
+  /** A finished run's steps — text, reasoning and tool calls — rendered the
+   *  way they looked while streaming, ahead of the run's final answer. */
+  function renderSavedSteps(steps, into) {
+    var put = into ? function(el) { into.appendChild(el); } : appendToChat;
+    steps.forEach(function(s) {
+      if (s.kind === 'tool') { put(renderSavedToolCard(s)); return; }
+      var d = document.createElement('div');
+      d.className = 'msg assistant-msg';
+      d.innerHTML = '<div class="bub"><div class="bub-thought">' +
+        (s.thinking ? thoughtShellHtml('Thought process', false) : '') +
+        '</div><div class="bub-content">' + md(s.text || '') + '</div></div>';
+      if (s.thinking) d.querySelector('.thought-body').innerHTML = md(s.thinking);
+      put(d);
+    });
+    renderMermaid();
+    flushCustomGraphs();
+  }
+
+  function renderSavedToolCard(s) {
+    var card = createToolCard(s.name, s.args || {});
+    delete card.dataset.start;
+    var hasResult = typeof s.output === 'string';
+    var statusEl = card.querySelector('#t-status');
+    statusEl.className = 'tool-status ' + (!hasResult ? 'ts-pending' : s.isError ? 'ts-failed' : 'ts-success');
+    statusEl.textContent = !hasResult ? 'no result' : s.isError ? 'failed' : 'success';
+    if (s.children && s.children.length) {
+      // A sub-agent's own steps, nested inside its task card.
+      var nested = document.createElement('div');
+      nested.className = 'subrun-steps';
+      nested.innerHTML = '<div class="run-step-label">Sub-agent steps</div>';
+      card.querySelector('#t-custom').appendChild(nested);
+      renderSavedSteps(s.children, nested);
+    }
+    if (!hasResult || !s.output) return card;
+    var outCont = card.querySelector('#t-out-container');
+    var outPre = card.querySelector('#t-out');
+    var toggle = card.querySelector('#btn-toggle');
+    outCont.style.display = 'block';
+    outCont.setAttribute('data-has-output', '1');
+    outPre.textContent = s.output;
+    toggle.onclick = function() {
+      var show = outPre.classList.toggle('show');
+      toggle.textContent = show ? 'Hide Details' : 'Show Details';
+    };
+    return card;
   }
 
   var SLASH_COMMANDS = [
@@ -2686,7 +2808,8 @@ window.onerror = function(message, source, lineno, colno, error) {
     if (reasoning) {
       if (!seThought.innerHTML) {
         seThought.innerHTML = thoughtShellHtml('Thinking…', true);
-        if (st) st.thoughtStart = Date.now();
+        // Replayed chunks arrive merged, so their timing isn't the real one.
+        if (st && !replaying) st.thoughtStart = Date.now();
       }
       seRawThought += reasoning;
       var body = seThought.querySelector('.thought-body');
@@ -2825,14 +2948,16 @@ window.onerror = function(message, source, lineno, colno, error) {
     if (tool === 'execute_command') return a.command || '';
     if (tool === 'task') return a.description || a.subagent_type || '';
     if (tool === 'call_mcp_tool') return (a.server || '') + '.' + (a.tool || '');
+    if (tool === 'browser') return (a.action || 'snapshot') + ' ' + (a.url || a.filter || a.direction || a.text || '');
+    if (tool === 'browser_action') return (a.action || '') + (a.ref ? ' [' + a.ref + ']' : '') + (a.text ? ' "' + a.text + '"' : a.key ? ' ' + a.key : a.value ? ' ' + a.value : '');
     var v = a.path || a.pattern || a.query || a.doctype || a.url || a.id || a.filter || a.page_name || a.name || '';
     return typeof v === 'string' ? v : JSON.stringify(v);
   }
 
-  function setToolDuration(card) {
+  function setToolDuration(card, endedAt) {
     card.classList.remove('running');
     var t = card.querySelector('.tool-time');
-    if (t && card.dataset.start) t.textContent = fmtDur(Date.now() - Number(card.dataset.start));
+    if (t && card.dataset.start) t.textContent = fmtDur((endedAt || Date.now()) - Number(card.dataset.start));
   }
 
   function md(t){
@@ -3025,14 +3150,17 @@ window.onerror = function(message, source, lineno, colno, error) {
     if (tool === 'introspect_doctype') return 'Introspecting DocType: `' + (args.doctype || '') + '`';
     if (tool === 'web_search') return 'Searching the web for: "' + (args.query || '') + '"...';
     if (tool === 'web_fetch') return 'Fetching webpage: `' + (args.url || '') + '`';
+    if (tool === 'browser') return 'Browser: ' + (args.action || 'snapshot') + (args.url ? ' `' + args.url + '`' : '');
+    if (tool === 'browser_action') return 'Browser: ' + (args.action || '') + (args.ref ? ' [' + args.ref + ']' : '');
     if (tool === 'call_mcp_tool') return 'Calling MCP tool: `' + (args.server || '') + '.' + (args.tool || '') + '`';
     if (tool === 'ask_clarification') return 'Awaiting clarification answers...';
     if (tool === 'update_todo_list') return 'Updating tasks list...';
     return 'Running ' + tool + '...';
   }
 
-  window.addEventListener('message',function(ev){
-    var m=ev.data;
+  window.addEventListener('message',function(ev){ onHostMessage(ev.data); });
+
+  function onHostMessage(m){
     switch(m.type){
       case'addMessage':addMsg(m.message.role,m.message.content);break;
       case'startStream':ss(m.messageId);break;
@@ -3126,8 +3254,14 @@ window.onerror = function(message, source, lineno, colno, error) {
       case 'compactionOffered': showCompactionBanner(m); break;
       case 'compactionApplied': showCompactionApplied(m); break;
       case 'tokenUsage': updateTokenBadge(m); break;
+      case 'runUsage': showRunUsage(m); break;
+      case 'reviewState': renderReviewState(m.files); break;
       case 'agentState':
-        if (m.state === 'running') {
+        if (m.background) {
+          // A run is going in another session — busy, but nothing to show here.
+          isSt = true;
+          updBtn();
+        } else if (m.state === 'running') {
           showThinking(m.phase || '');
           isSt = true;
           updBtn();
@@ -3218,7 +3352,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         var card = cardEntry.card;
         if (card) {
           // Time the execution itself, not the wait for approval.
-          card.dataset.start = String(Date.now());
+          card.dataset.start = String(m.at || Date.now());
           card.classList.add('running');
           var toolStatusEl = card.querySelector('#t-status');
           if (toolStatusEl) {
@@ -3265,7 +3399,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         var cardEntry = resolveToolCard(m);
         var card = cardEntry.card;
         if (card) {
-          setToolDuration(card);
+          setToolDuration(card, m.at);
           // Live command output collapses once it succeeds; failures stay open.
           if (m.tool === 'execute_command' && m.success) card.classList.remove('open');
           var toolStatusEl = card.querySelector('#t-status');
@@ -3363,19 +3497,22 @@ window.onerror = function(message, source, lineno, colno, error) {
         ch.innerHTML = '';
         autoScroll = true;
         activeMentions = [];
+        resetLiveState();
         if (m.messages && m.messages.length > 0) {
           m.messages.forEach(function(msg) {
             if (msg.role === 'user') {
               parseAndRegisterMentions(msg.content);
             }
             var msgMeta = msg.runId
-              ? { agentId: msg.agentId, runId: msg.runId, hasCheckpoint: msg.hasCheckpoint }
+              ? { agentId: msg.agentId, runId: msg.runId, hasCheckpoint: msg.hasCheckpoint, steps: msg.steps }
               : (msg.role === 'user' && msg.promptHasCheckpoint ? { isPromptRevert: true, promptId: msg.promptId } : null);
+            if (msg.steps) renderSavedSteps(msg.steps);
             addMsg(msg.role, msg.content, msgMeta);
           });
-        } else {
+        } else if (!m.live) {
           showWelcomeScreen();
         }
+        if (m.live) replayLive(m.live);
         break;
       case 'showClarificationPopup':
         showClarification(m.questions);
@@ -3438,7 +3575,7 @@ window.onerror = function(message, source, lineno, colno, error) {
         renderTodoList(m);
         break;
     }
-  });
+  }
 
   var gpPanel = document.getElementById('graph-panel');
   var gpTitle = document.getElementById('graph-title');
@@ -3479,6 +3616,45 @@ window.onerror = function(message, source, lineno, colno, error) {
     pending: '<span class="todo-circle"></span>',
     cancelled: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M6 12h12"/></svg>'
   };
+
+  /** The review bar above the input: files the agent changed that the user
+   *  hasn't accepted or rejected yet. Clicking a file opens its diff. */
+  var reviewDock = document.getElementById('review-dock');
+  var reviewFiles = document.getElementById('review-files');
+  document.getElementById('review-toggle').onclick = function() {
+    var collapsed = reviewDock.classList.toggle('collapsed');
+    this.setAttribute('aria-expanded', String(!collapsed));
+  };
+  document.getElementById('review-accept-all').onclick = function() { vs.postMessage({ type: 'reviewAcceptAll' }); };
+  document.getElementById('review-reject-all').onclick = function() { vs.postMessage({ type: 'reviewRejectAll' }); };
+
+  function renderReviewState(files) {
+    files = files || [];
+    reviewDock.classList.toggle('show', files.length > 0);
+    document.getElementById('review-count').textContent = files.length + (files.length === 1 ? ' File With Changes' : ' Files With Changes');
+    reviewFiles.innerHTML = '';
+    files.forEach(function(f) {
+      var slash = f.path.lastIndexOf('/');
+      var li = document.createElement('li');
+      li.className = 'review-file';
+      li.title = 'Open diff: ' + f.path;
+      li.innerHTML =
+        '<span class="review-stat review-add">+' + f.added + '</span>' +
+        '<span class="review-stat review-del">-' + f.removed + '</span>' +
+        '<span class="review-name">' + esc(f.path.slice(slash + 1)) + '</span>' +
+        (f.isNew ? '<span class="review-new">new</span>' : '') +
+        '<span class="review-dir">' + esc(slash > 0 ? f.path.slice(0, slash) : '') + '</span>' +
+        '<span class="review-acts">' +
+          '<button class="review-icon" data-act="reviewRejectFile" title="Reject changes to this file">✕</button>' +
+          '<button class="review-icon" data-act="reviewAcceptFile" title="Accept changes to this file">✓</button>' +
+        '</span>';
+      li.onclick = function(e) {
+        var act = e.target.closest && e.target.closest('[data-act]');
+        vs.postMessage({ type: act ? act.getAttribute('data-act') : 'reviewOpenDiff', path: f.path });
+      };
+      reviewFiles.appendChild(li);
+    });
+  }
 
   function renderTodoList(state) {
     todoState = { items: (state && state.items) || [], stale: !!(state && state.stale) };

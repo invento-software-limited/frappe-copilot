@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.12.0] - 2026-10-07
+
+### Added
+
+- **Accept / Reject Review of Agent Edits** (`src/review/`) — Every file the agent changes (`write_file`, `edit_file`, `multi_edit`) is tracked against what it looked like before the agent touched it. Edits still land on disk right away (migrations and tests run against them); you then keep or undo them:
+  - *Review bar* above the chat input — each changed file with `+added -removed` line counts, a "new" tag for created files and its folder; click to open a before/after diff, hover for per-file ✓ / ✕; **Accept all** / **Reject all** (asks first). Rejecting a created file deletes it.
+  - *In the editor* — added lines highlighted, removed lines marked with the old text on hover, and **Accept / Reject** CodeLens buttons on every hunk plus **Accept file / Reject file / Open diff** at the top. `Alt+Enter` accepts and `Shift+Alt+Backspace` rejects the hunk under the cursor.
+  - Pending reviews persist in `.frappe-copilot/review.json` and accumulate across runs — the baseline is always the file as you last accepted it. Toggle with `frappe-copilot.reviewChanges` (default on).
+- **Browser Tools** — `browser` (navigate, read the page, scroll, back/forward/reload, wait, tabs, screenshot) and `browser_action` (click, type, select, hover, upload, press, evaluate) drive a real Chrome/Chromium/Edge/Brave through `puppeteer-core` (no browser download). Pages are read as a text outline whose `[n]` refs are clicked or filled; every action returns the updated outline. Cross-origin iframes are outlined too; `upload` only accepts workspace files. `browser_action` needs approval in ask mode. The window is visible by default and keeps a persistent profile in `~/.frappe-copilot/browser-profile`, so a login done once is reused. Settings: `frappe-copilot.browser.executablePath`, `frappe-copilot.browser.headless`.
+- **Images in Tool Results** — Browser screenshots and `read_file` on a png/jpg/gif/webp reach the model as images it can look at, on every provider. Only the latest two screenshot turns are kept in context. A model that rejects images is switched to text-only for the session. Setting: `frappe-copilot.toolImages`.
+- **Web Search Backends** — `frappe-copilot.webSearch.provider` selects Brave Search, Tavily, a SearXNG instance (`webSearch.searxngUrl`) or DuckDuckGo; `auto` (default) uses Brave/Tavily when a key is set. New command **Frappe Copilot: Set Web Search API Key** stores the key in VS Code secret storage (`BRAVE_API_KEY` / `TAVILY_API_KEY` env vars also work).
+- **Run Usage and Limits** — Input/output tokens of the request in flight show in the status line and in the "Worked for …" line. `frappe-copilot.runLimits.pauseAfterSteps` (default 100) and `runLimits.pauseAfterTokens` (default off) pause a long run and ask Continue / Stop; each Continue doubles the limit, and the stop button also ends the pause.
+- **Full Run History When Reopening a Chat** — Saved runs now show the steps they streamed live — intermediate text, collapsed reasoning, and tool calls with status and output — instead of only the final answer behind "Show sub-agent steps". A `task` call shows its sub-agent's own steps nested inside its card.
+- **Test Suite and CI** — `npm test` runs 52 tests on Node's built-in runner (no new framework): unit tests plus integration tests that drive the agent runtime and the chat panel with a scripted model through a lightweight `vscode` stub (`src/test/support/`). ESLint (flat config, `typescript-eslint`) is set up for `npm run lint`. A new CI workflow runs build, lint and tests on pushes to `main` and pull requests; the release workflow runs them before packaging.
+
+### Fixed
+
+- **Reopening the Chat Mid-run Lost the Stream** — A chat closed and reopened (or switched away from and back) while the agent was working showed only saved messages and none of the run in progress. Every event of the run in flight is now kept and replayed on reopen — streamed text, tool cards with their real start times, running command output, the run timer — and streaming continues from there. Approvals or questions still waiting reappear with working buttons; answered ones don't.
+- **A Run's Stream Leaked Into Other Sessions** — Switching sessions mid-run rendered the running reply into the session now on screen, and could attach its "revert this prompt" link to the wrong message. Run events now only reach the session they belong to; other sessions just show the agent as busy.
+- **`web_search` Reported "No Results" When Blocked** — DuckDuckGo increasingly answers automated requests with a bot check, which was returned as a successful empty search, so the agent concluded nothing existed online. It's now an error that says how to configure another backend or use the browser tool.
+- **A Corrupt Line Emptied a Whole Session** — One unparsable line in `messages.jsonl` or a run transcript (e.g. from an interrupted write) made the entire history read as empty. Only that line is skipped now, with a warning; session store failures are logged instead of swallowed.
+- **A Typo in `mcp.json` Could Wipe Its Servers** — An unreadable MCP config read as "no servers", and the next add/update rewrote the file with only the new entry. An unreadable file is now never overwritten, and the error is logged.
+- **Site Schema Never Refreshed at Startup** — the startup schema load ran before the tool executor existed and always failed silently; it now runs once the executor is ready.
+
+### Changed
+
+- **Chat Panel Split Up** — `src/chat/panel.ts` (2,181 lines) is now a 280-line webview host. The agent run lives in `src/chat/runtime/` (orchestrator, loop, step, tool calls, verification, sub-agents, pipeline, streaming, prompt building, run limits); approvals, model settings, compaction, settings/auth, revert, checkpoints and attachments are separate modules in `src/chat/`. No file in `src/chat` exceeds 300 lines.
+- Removed dead code flagged by lint (an unused bench-detection function and unused imports) and the stray `pdf-test.mjs` scratch script.
+
 ## [1.11.0] - 2026-10-06
 
 ### Added

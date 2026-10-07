@@ -23,5 +23,5 @@ Assistant: "I will use grep search to look for server script calls in hooks.py f
   <glob>hooks.py</glob>
 </tool_call>`,
   allowedTools: ALL_TOOLS,
-  highRiskTools: ['write_file', 'edit_file', 'multi_edit', 'execute_command', 'write_custom_field', 'write_property_setter', 'write_client_script', 'write_server_script', 'export_customizations', 'write_builder_page', 'call_mcp_tool'],
+  highRiskTools: ['write_file', 'edit_file', 'multi_edit', 'execute_command', 'write_custom_field', 'write_property_setter', 'write_client_script', 'write_server_script', 'export_customizations', 'write_builder_page', 'call_mcp_tool', 'browser_action'],
 };

@@ -29,6 +29,10 @@ interface RawServerEntry {
  *  workspace in the IDE's own MCP config files. Mirrors SkillsStore's
  *  file-backed, defensively-parsed style. */
 export class MCPStore {
+  /** Config files that exist but couldn't be parsed — never overwritten, so a
+   *  typo in mcp.json can't silently wipe the servers declared in it. */
+  private unreadable = new Set<string>();
+
   constructor(
     private frappeCopilotPath: string,
     private workspaceRoot: string
@@ -56,8 +60,11 @@ export class MCPStore {
       // Tag with which file this came from, unless the entry already claims
       // a scope explicitly (shouldn't normally happen — persisted entries
       // never carry 'scope', it's stripped on write — but respected if set).
+      this.unreadable.delete(filePath);
       return servers.map(s => ({ ...s, scope: s.scope || scope }));
-    } catch {
+    } catch (e) {
+      this.unreadable.add(filePath);
+      console.warn(`[frappe-copilot] MCP config ${filePath} could not be read and will not be overwritten:`, e instanceof Error ? e.message : e);
       return [];
     }
   }
@@ -76,11 +83,16 @@ export class MCPStore {
   }
 
   private writeManualFile(filePath: string, dir: string, servers: McpServerConfig[]): boolean {
+    if (this.unreadable.has(filePath)) {
+      console.error(`[frappe-copilot] Not saving MCP servers: fix the JSON in ${filePath} first — overwriting it would lose its entries.`);
+      return false;
+    }
     try {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(filePath, JSON.stringify({ servers } satisfies McpStoreFile, null, 2));
       return true;
-    } catch {
+    } catch (e) {
+      console.warn(`[frappe-copilot] Could not write ${filePath}:`, e instanceof Error ? e.message : e);
       return false;
     }
   }
@@ -91,7 +103,7 @@ export class MCPStore {
    *  existed); which file an entry lives in *is* its scope on the next read. */
   private writeManual(servers: McpServerConfig[]): boolean {
     const strip = (s: McpServerConfig): McpServerConfig => {
-      const { scope, ...rest } = s;
+      const { scope: _scope, ...rest } = s;
       return rest as McpServerConfig;
     };
     const workspaceServers = servers.filter(s => (s.scope || 'workspace') === 'workspace').map(strip);

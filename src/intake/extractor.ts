@@ -250,7 +250,7 @@ function parseMerged(text: string): MergedUnderstanding {
   for (const line of lines) {
     const trimmed = line.trim();
     // Match headings: ## Title, **Title**, ### N. Title, Title:
-    const match = trimmed.match(/^(?:#{1,3}\s+|\*\*|\d+[\.\)]\s*)?(Overall Summary|Requirements|Frappe DocTypes|Frappe Modules|UI Components|Data Models|Cross-Section Relationships|Unknowns)\s*(?::\s*)?(?:\*\*)?$/i);
+    const match = trimmed.match(/^(?:#{1,3}\s+|\*\*|\d+[.)]\s*)?(Overall Summary|Requirements|Frappe DocTypes|Frappe Modules|UI Components|Data Models|Cross-Section Relationships|Unknowns)\s*(?::\s*)?(?:\*\*)?$/i);
     if (match) {
       currentSection = match[1];
       // Normalize to the canonical name
@@ -264,12 +264,12 @@ function parseMerged(text: string): MergedUnderstanding {
 
   const extractList = (arr: string[]): string[] => {
     if (!arr || arr.length === 0) return [];
-    const items = arr.filter(l => l.startsWith('-') || l.startsWith('*') || l.startsWith('•') || /^\d+[\.\)]/.test(l));
+    const items = arr.filter(l => l.startsWith('-') || l.startsWith('*') || l.startsWith('•') || /^\d+[.)]/.test(l));
     if (items.length === 0) {
       // No list items — treat the whole block as a paragraph
       return arr.filter(l => l.length > 0);
     }
-    return items.map(i => i.replace(/^[-*\d\.\)\s]+/, '').trim()).filter(Boolean);
+    return items.map(i => i.replace(/^[-*\d.)\s]+/, '').trim()).filter(Boolean);
   };
 
   const getSection = (name: string): string[] => sections[name] || [];

@@ -1,7 +1,7 @@
 ---
 name: capture-solutions
 description: >-
-  Whenever you (Claude) struggle with a problem — a command that didn't work, a
+  Whenever you struggle with a problem — a command that didn't work, a
   bug that took 3+ minutes to debug, a config you had to look up, a Frappe
   gotcha, a Docker quirk — save the solution as a reference so future sessions
   never repeat the struggle.
