@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.1] - 2026-10-07
+
+### Fixed
+
+- **New Chat Button Closed the Chat** — The new-chat icon ran the same command as the toolbar's chat toggle, which closes the Secondary Side Bar when it's already showing, so the chat disappeared and had to be reopened. Opening a session from history and **Mention Code** had the same problem. These now only bring the chat into view (its visible side bar, else its editor tab) and never close it; the toolbar icon still toggles.
+- **`<invoke>` Markup in Replies** — In the text tool protocol, some models (e.g. DeepSeek via OpenCode Zen) write tool calls in their own `<invoke name="…"><parameter name="…">` syntax instead of `<tool_call>`. The raw markup showed in the chat, the calls didn't run, and the model needed a correction round trip to repeat them. Those calls now run directly (including `｜DSML｜`-prefixed tags and `<function_calls>` wrappers); a stray `<invoke>` next to a real `<tool_call>` is ignored so nothing runs twice; and the chat hides both syntaxes — in live replies, while a block is still streaming in, and in reopened history.
+
 ## [1.12.0] - 2026-10-07
 
 ### Added

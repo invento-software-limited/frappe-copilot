@@ -1,5 +1,5 @@
 import { Message } from '../types';
-import { parseXmlToolCalls } from './xmlToolCalls';
+import { parseXmlToolCalls, stripToolCallMarkup } from './xmlToolCalls';
 
 /** Saved tool output is capped so reloading a long session stays light. */
 const MAX_OUTPUT_CHARS = 4000;
@@ -52,7 +52,7 @@ function addAssistantSteps(
   steps: RunStep[],
   byId: Map<string, ToolStep>
 ): ToolStep[] {
-  const text = stripXmlToolCalls(e.content).trim();
+  const text = stripToolCallMarkup(e.content).trim();
   const thinking = (e.thinkingBlocks || []).map(b => b.thinking).filter(Boolean).join('\n\n');
   if (text || thinking) steps.push({ kind: 'text', text, ...(thinking ? { thinking } : {}) });
 
@@ -94,10 +94,6 @@ function dropRepeatedFinalText(steps: RunStep[], finalText: string): void {
     if (!s.text && !s.thinking) steps.splice(i, 1);
     return;
   }
-}
-
-function stripXmlToolCalls(t: string): string {
-  return t.replace(/<tool_call\s+name="(\w+)"\s*>[\s\S]*?<\/tool_call>/g, '').replace(/<\/?tool_calls\s*>/g, '');
 }
 
 function cap(s: string): string {

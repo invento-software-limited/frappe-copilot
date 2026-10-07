@@ -104,6 +104,19 @@ export class ChatPanel implements vscode.WebviewViewProvider {
     this.panel.webview.onDidReceiveMessage(m => this.handleMsg(m), null, this.disposables);
   }
 
+  /** Brings the chat into view where it already is — the visible side bar,
+   *  else its editor tab, else the side bar — without closing anything. */
+  reveal(): void {
+    if (this.webviewView?.visible) return;
+    if (this.panel) {
+      this.panel.reveal(this.panel.viewColumn, true);
+    } else if (this.webviewView) {
+      this.webviewView.show(true);
+    } else {
+      void vscode.commands.executeCommand('frappe-copilot.agentChat.focus');
+    }
+  }
+
   /** Whether the Secondary Side Bar agent view is currently visible */
   isViewVisible(): boolean {
     return !!this.webviewView?.visible;

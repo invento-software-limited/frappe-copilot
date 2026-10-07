@@ -197,3 +197,15 @@ test('Continue doubles the limit and lets the run finish', () => withHarness(
     assert.equal(h.ui.ofType('addMessage').filter(e => /Paused after/.test(e.message.content)).length, 2);
   }
 ));
+
+test('tool calls in the <invoke> dialect run without a correction round trip', () => withHarness(
+  [say('<invoke name="list_dir">\n<parameter name="path">.</parameter>\n</invoke>'), say('Listed.')],
+  async h => {
+    fs.writeFileSync(path.join(h.root, 'x.txt'), '');
+    await h.runtime.orchestrator.run('list files');
+    assert.equal(h.provider.requests.length, 2);
+    assert.match(h.provider.requests[1].messages.at(-1)!.content, /<tool_result name="list_dir">[\s\S]*x\.txt/);
+    assert.ok(!h.provider.requests[1].messages.some(m => /invalid tool-call format/.test(m.content)));
+  },
+  false
+));

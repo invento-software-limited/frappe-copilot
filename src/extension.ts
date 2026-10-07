@@ -248,10 +248,8 @@ function registerCommands(context: vscode.ExtensionContext) {
         const session = sessionManager.sessions.find(s => s.id === sessionId);
         if (session) {
           sessionManager.setActiveSession(session);
-          await openChat();
-          if (chatPanel) {
-            chatPanel.loadSession(session);
-          }
+          await revealChat();
+          chatPanel?.loadSession(session);
         }
       }
     })
@@ -406,18 +404,16 @@ function ensureReview(frappeCopilotPath: string): void {
   registerReview(extensionContext, review);
 }
 
-/** Open the chat panel — runs initial setup first if needed.
- *  By default opens/toggles in the Secondary Side Bar (agent panel), replacing Antigravity agent panel.
- *  If inTab is true, opens as an editor tab in ViewColumn.Two.
- */
-async function openChat(inTab: boolean = false) {
+/** Creates the chat panel if needed — workspace setup, then the first-run
+ *  API key / bench setup. False when there's no workspace to open it in. */
+async function ensureChatPanel(): Promise<boolean> {
   if (!sessionManager) {
     const frappeCopilotPath = initializeWorkspaceStructure();
     if (!frappeCopilotPath) {
       vscode.window.showErrorMessage(
         'Frappe Copilot: Please open a workspace folder first.'
       );
-      return;
+      return false;
     }
     sessionManager = new SessionManager(frappeCopilotPath);
     ensureReview(frappeCopilotPath);
@@ -451,6 +447,15 @@ async function openChat(inTab: boolean = false) {
       )
     );
   }
+  return true;
+}
+
+/** The chat's toolbar entry point: opens the chat in the Secondary Side Bar
+ *  (or an editor tab when `inTab`), and closes the side bar when it's
+ *  already showing. Actions that just need the chat on screen use
+ *  revealChat() instead, which never closes it. */
+async function openChat(inTab: boolean = false) {
+  if (!(await ensureChatPanel()) || !chatPanel) return;
 
   if (inTab) {
     chatPanel.showInTab();
@@ -480,10 +485,15 @@ async function createNewSession(): Promise<void> {
 
   const defaultName = 'New Session';
   const session = sessionManager.createSession(defaultName);
-  await openChat();
-  if (chatPanel) {
-    chatPanel.loadSession(session);
-  }
+  await revealChat();
+  chatPanel?.loadSession(session);
+}
+
+/** Puts the chat on screen wherever it already lives (side bar or editor
+ *  tab) without ever closing it. */
+async function revealChat(): Promise<void> {
+  if (!chatPanel && !(await ensureChatPanel())) return;
+  chatPanel?.reveal();
 }
 
 /** Prompt for a name + one-line description, scaffold the skill file, and open
@@ -788,8 +798,8 @@ async function mentionSelectedCode(): Promise<void> {
     return;
   }
 
-  // Open/reveal chat panel
-  await openChat();
+  // Reveal the chat — never toggle it closed
+  await revealChat();
 
   if (chatPanel) {
     const document = editor.document;

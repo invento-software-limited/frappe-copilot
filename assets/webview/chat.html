@@ -1241,12 +1241,19 @@ window.onerror = function(message, source, lineno, colno, error) {
     call_mcp_tool: { icon: '🔌', title: 'MCP Tool Call' }
   };
 
+  /** Hides tool-call markup from a reply: <tool_call> blocks, the <invoke>
+   *  dialect some models slip into (optionally "｜DSML｜"-prefixed), their
+   *  wrappers, and a block still streaming in that hasn't closed yet. */
+  var TC_PREFIX = '(?:[^\\w\\s<>"]{0,3}DSML[^\\w\\s<>"]{0,3})?';
+  var TC_INVOKE = new RegExp('<' + TC_PREFIX + 'invoke\\s+name="\\w+"\\s*>[\\s\\S]*?<\\/' + TC_PREFIX + 'invoke>', 'g');
+  var TC_WRAPPER = new RegExp('<\\/?(?:tool_calls|' + TC_PREFIX + 'function_calls)\\s*>', 'g');
+  var TC_OPEN_TAIL = new RegExp('<(?:tool_call\\s+name=|' + TC_PREFIX + 'invoke\\s+name=)[\\s\\S]*$');
   function stripToolCalls(t) {
     if (!t) return '';
-    var stripped = t.replace(/<tool_call\s+name="(\w+)"\s*>([\s\S]*?)<\/tool_call>/g, '');
-    stripped = stripped.replace(/<tool_calls\s*>/g, '');
-    stripped = stripped.replace(/<\/tool_calls\s*>/g, '');
-    return stripped;
+    return t.replace(/<tool_call\s+name="(\w+)"\s*>([\s\S]*?)<\/tool_call>/g, '')
+      .replace(TC_INVOKE, '')
+      .replace(TC_WRAPPER, '')
+      .replace(TC_OPEN_TAIL, '');
   }
 
   function stripDetailedMentions(content) {
