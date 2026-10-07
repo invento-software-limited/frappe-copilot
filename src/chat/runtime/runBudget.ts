@@ -1,22 +1,35 @@
 import * as vscode from 'vscode';
+import { TokenUsage } from '../../types';
 import { ChatUi } from '../chatUi';
 
 export interface RunUsage {
   calls: number;
   promptTokens: number;
   completionTokens: number;
+  freshInputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
 }
+
+const EMPTY_USAGE: RunUsage = {
+  calls: 0,
+  promptTokens: 0,
+  completionTokens: 0,
+  freshInputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+};
 
 function limits(): { steps: number; tokens: number } {
   const cfg = vscode.workspace.getConfiguration('frappe-copilot.runLimits');
-  return { steps: Math.max(0, cfg.get<number>('pauseAfterSteps', 100)), tokens: Math.max(0, cfg.get<number>('pauseAfterTokens', 0)) };
+  return { steps: Math.max(0, cfg.get<number>('pauseAfterSteps', 100)), tokens: Math.max(0, cfg.get<number>('pauseAfterTokens', 200_000)) };
 }
 
 /** Token usage of the run in flight, and the guard that pauses a run which
  *  has gone on suspiciously long so the user can stop it before it burns
  *  through their budget. Each "continue" doubles the limit that was hit. */
 export class RunBudget {
-  private usage: RunUsage = { calls: 0, promptTokens: 0, completionTokens: 0 };
+  private usage: RunUsage = { ...EMPTY_USAGE };
   private steps = 0;
   private stepLimit = 0;
   private tokenLimit = 0;
@@ -24,7 +37,7 @@ export class RunBudget {
   constructor(private ui: ChatUi) {}
 
   begin(): void {
-    this.usage = { calls: 0, promptTokens: 0, completionTokens: 0 };
+    this.usage = { ...EMPTY_USAGE };
     this.steps = 0;
     const { steps, tokens } = limits();
     this.stepLimit = steps;
@@ -36,10 +49,13 @@ export class RunBudget {
   }
 
   /** One model call finished; usage is estimated when the provider reports none. */
-  record(promptTokens: number, completionTokens: number): void {
+  record(call: TokenUsage): void {
     this.usage.calls++;
-    this.usage.promptTokens += promptTokens;
-    this.usage.completionTokens += completionTokens;
+    this.usage.promptTokens += call.promptTokens;
+    this.usage.completionTokens += call.completionTokens;
+    this.usage.freshInputTokens += call.freshInputTokens ?? call.promptTokens;
+    this.usage.cacheReadTokens += call.cacheReadTokens ?? 0;
+    this.usage.cacheWriteTokens += call.cacheWriteTokens ?? 0;
     this.ui.say('runUsage', { ...this.usage, live: true });
   }
 

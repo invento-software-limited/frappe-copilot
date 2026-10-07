@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { Message, ChatOptions, ChatResponse } from '../types';
 import { LLMProvider } from './interface';
 import { toOpenAIMessages, toOpenAITools, OpenAIToolAccumulator, samplingParams } from './openaiMessage';
+import { openAIUsage } from './tokenUsage';
 
 const API_KEY_SECRET = 'frappe-copilot.openaiApiKey';
 
@@ -87,6 +88,7 @@ export class OpenAIProvider implements LLMProvider {
       content: data.choices?.[0]?.message?.content || '',
       model: data.model || this.model,
       truncated: data.choices?.[0]?.finish_reason === 'length',
+      usage: openAIUsage(data.usage),
     };
   }
 
@@ -186,7 +188,7 @@ export class OpenAIProvider implements LLMProvider {
               const truncated = choice?.finish_reason === 'length';
               toolAcc.add(deltaObj?.tool_calls);
               if (chunk.usage) {
-                usage = { promptTokens: chunk.usage.prompt_tokens, completionTokens: chunk.usage.completion_tokens, totalTokens: chunk.usage.total_tokens };
+                usage = openAIUsage(chunk.usage);
               }
               reasoningText += reasoning;
               if (truncated) lengthCut = true;

@@ -132,12 +132,19 @@ export class AgentStepper {
     const { ui, provider, models } = this.rt.deps;
     const window = models.contextWindow();
     const prompt = streamed.usage?.promptTokens || estimateMessagesTokens(sent);
+    const completion = streamed.usage?.completionTokens || Math.ceil((streamed.content.length + streamed.reasoning.length) / 4);
+    const reported = streamed.usage?.promptTokens ? streamed.usage : undefined;
     ui.say('tokenUsage', { estimatedTokens: prompt, budget: window, live: true });
-    this.rt.budget.record(prompt, streamed.usage?.completionTokens || Math.ceil((streamed.content.length + streamed.reasoning.length) / 4));
+    this.rt.budget.record(reported || {
+      promptTokens: prompt,
+      completionTokens: completion,
+      totalTokens: prompt + completion,
+      freshInputTokens: prompt,
+    });
     // Providers that clear old tool results server-side need an append-only
     // history — rewriting it invalidates thinking blocks.
     if (provider.managesContextServerSide?.()) return;
-    const freed = pruneRunHistory(localHistory, prompt + (streamed.usage?.completionTokens || 0), window);
+    const freed = pruneRunHistory(localHistory, prompt + completion, window);
     if (freed > 0) console.log(`[context] cleared ~${Math.round(freed / 4)} tokens of older tool output (${prompt}/${window})`);
   }
 }

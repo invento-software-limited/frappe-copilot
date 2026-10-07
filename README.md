@@ -51,8 +51,12 @@ and click the settings gear icon. Your key is stored securely in VS Code's Secre
 
 ### 3. Open the chat
 
-Run **Frappe Copilot: Open Chat** from the Command Palette, or click the status bar icon
-labeled `Frappe Copilot`.
+Run **Frappe Copilot: Open Chat** from the Command Palette, click the status bar icon
+labeled `Frappe Copilot`, or press **Ctrl+Alt+B** (**Cmd+Alt+B** on macOS). When the
+chat is visible, the comment-discussion icon in its title bar toggles it. When the
+chat is closed, open the persistent **Frappe Copilot** Activity Bar container and
+use the same icon in the **Sessions** view header to bring it back. The same
+toggle icon is also available beside the Codex action in the editor title bar.
 
 ### 4. Configure your bench (automatic)
 

@@ -1389,7 +1389,14 @@ window.onerror = function(message, source, lineno, colno, error) {
   var runUsage = null;
   function fmtTokens(n) { return n >= 1000 ? Math.round(n / 1000) + 'k' : String(n); }
   function usageText(u) {
-    return u && u.calls ? '↑' + fmtTokens(u.promptTokens) + ' ↓' + fmtTokens(u.completionTokens) + ' tokens' : '';
+    if (!u || !u.calls) return '';
+    var cache = u.cacheReadTokens || u.cacheWriteTokens;
+    var detail = cache
+      ? ' (' + fmtTokens(u.freshInputTokens) + ' fresh'
+        + (u.cacheReadTokens ? ' · ' + fmtTokens(u.cacheReadTokens) + ' cached' : '')
+        + (u.cacheWriteTokens ? ' · ' + fmtTokens(u.cacheWriteTokens) + ' cache write' : '') + ')'
+      : '';
+    return '↑' + fmtTokens(u.promptTokens) + detail + ' ↓' + fmtTokens(u.completionTokens) + ' tokens';
   }
   function showRunUsage(m) {
     runUsage = m;

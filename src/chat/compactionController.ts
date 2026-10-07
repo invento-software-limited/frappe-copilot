@@ -2,12 +2,10 @@ import * as vscode from 'vscode';
 import { LLMProvider } from '../providers/interface';
 import { SessionManager } from '../session/manager';
 import { Session } from '../types';
-import { estimateMessagesTokens, buildCompactionPrompt } from '../session/compaction';
+import { estimateMessagesTokens, buildCompactionPrompt, DEFAULT_COMPACTION_THRESHOLD_TOKENS } from '../session/compaction';
 import { ChatUi } from './chatUi';
 import { ModelSettings } from './modelSettings';
 
-/** Offer compaction once history passes this share of the context window. */
-const OFFER_COMPACT_AT = 0.5;
 /** Compact automatically past this share. */
 const AUTO_COMPACT_AT = 0.8;
 
@@ -78,10 +76,11 @@ export class CompactionController {
     }
   }
 
-  /** The user's explicit thresholdTokens setting, else a share of the model's window. */
+  /** The configured threshold, with an absolute default for cost control. */
   private threshold(window: number): number {
-    const inspected = vscode.workspace.getConfiguration('frappe-copilot').inspect<number>('compaction.thresholdTokens');
-    const explicit = inspected?.workspaceFolderValue ?? inspected?.workspaceValue ?? inspected?.globalValue;
-    return explicit ?? Math.round(window * OFFER_COMPACT_AT);
+    return vscode.workspace.getConfiguration('frappe-copilot').get<number>(
+      'compaction.thresholdTokens',
+      Math.min(DEFAULT_COMPACTION_THRESHOLD_TOKENS, Math.round(window * 0.5))
+    );
   }
 }

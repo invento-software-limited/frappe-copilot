@@ -41,7 +41,7 @@ export class LlmStreamer {
         if (c.truncated) truncated = true;
         if (c.toolCalls?.length) toolCalls = [...(toolCalls || []), ...c.toolCalls];
         if (c.thinkingBlocks?.length) thinkingBlocks = [...(thinkingBlocks || []), ...c.thinkingBlocks];
-        if (c.usage?.promptTokens) usage = c.usage;
+        if (c.usage) usage = c.usage;
         if (c.content || c.reasoning) {
           ui.post({ type: 'streamChunk', messageId: id, chunk: c.content, reasoning: c.reasoning || '' });
         }

@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { Message, ChatOptions, ChatResponse } from '../types';
 import { LLMProvider } from './interface';
 import { toOpenAIMessages, toOpenAITools, OpenAIToolAccumulator, samplingParams } from './openaiMessage';
+import { openAIUsage } from './tokenUsage';
 
 /** Response shape from OpenAI-compatible /chat/completions endpoint. */
 interface OpenCodeZenResponse {
@@ -19,6 +20,7 @@ interface OpenCodeZenResponse {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+    prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
   };
 }
 
@@ -134,13 +136,7 @@ export class OpenCodeZenProvider implements LLMProvider {
       content: data.choices[0]?.message?.content || '',
       model: data.model,
       truncated: data.choices[0]?.finish_reason === 'length',
-      usage: data.usage
-        ? {
-          promptTokens: data.usage.prompt_tokens,
-          completionTokens: data.usage.completion_tokens,
-          totalTokens: data.usage.total_tokens,
-        }
-        : undefined,
+      usage: openAIUsage(data.usage),
     };
   }
 
@@ -234,7 +230,7 @@ export class OpenCodeZenProvider implements LLMProvider {
               const truncated = choice?.finish_reason === 'length';
               toolAcc.add(deltaObj?.tool_calls);
               if (chunk.usage) {
-                usage = { promptTokens: chunk.usage.prompt_tokens, completionTokens: chunk.usage.completion_tokens, totalTokens: chunk.usage.total_tokens };
+                usage = openAIUsage(chunk.usage);
               }
               reasoningText += reasoning;
               if (truncated) lengthCut = true;
@@ -244,13 +240,7 @@ export class OpenCodeZenProvider implements LLMProvider {
                   reasoning: reasoning,
                   model: chunk.model || this.model,
                   truncated,
-                  usage: chunk.usage
-                    ? {
-                      promptTokens: chunk.usage.prompt_tokens,
-                      completionTokens: chunk.usage.completion_tokens,
-                      totalTokens: chunk.usage.total_tokens,
-                    }
-                    : undefined,
+                  usage: openAIUsage(chunk.usage),
                 };
               }
             } catch {

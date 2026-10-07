@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.13.0] - 2026-10-07
+
+### Added
+
+- **Chat Toggle Shortcut and Persistent Actions** — Added the `Frappe Copilot: Toggle Chat` command with `Ctrl+Alt+B` (`Cmd+Alt+B` on macOS), a comment-discussion icon in the chat view title bar, the Activity Bar Sessions view header, and the editor title bar beside Codex.
+- **Cache-Aware Token Usage** — Run totals now distinguish logical prompt tokens, fresh input, cache reads, cache writes, and output across Anthropic and OpenAI-compatible providers. The chat status line shows the breakdown when caching is active.
+- **Run Token Guard** — Requests pause at 200k logical tokens by default, with Continue doubling the limit as before. Set `frappe-copilot.runLimits.pauseAfterTokens` to customize or `0` to disable it.
+
+### Changed
+
+- **Earlier Context Cleanup** — Large-window models now prune older tool output at an 80k absolute cost ceiling and retain only the newest result after 160k, while existing context-window thresholds remain in place.
+- **Compaction Default** — Conversation compaction is offered at the declared 40k default instead of silently waiting for half of a large model context window.
+
 ## [1.12.2] - 2026-10-07
 
 ### Fixed

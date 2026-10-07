@@ -6,6 +6,7 @@ import { Message, ChatOptions, ChatResponse } from '../types';
 import { LLMProvider } from './interface';
 import { AnthropicTurn, AnthropicStreamState, toAnthropicTurns, toAnthropicTools } from './anthropicMessages';
 import { generationParams, addBeta, CONTEXT_EDITING, CONTEXT_EDITING_BETA } from './anthropicParams';
+import { anthropicUsage } from './tokenUsage';
 
 const API_KEY_SECRET = 'frappe-copilot.anthropicApiKey';
 
@@ -411,13 +412,7 @@ export class AnthropicProvider implements LLMProvider {
       reasoning: reasoning || undefined,
       model: data.model || this.model,
       truncated: data.stop_reason === 'max_tokens',
-      usage: usage ? {
-        promptTokens: usage.input_tokens || 0,
-        completionTokens: usage.output_tokens || 0,
-        totalTokens: (usage.input_tokens || 0) + (usage.output_tokens || 0),
-        cacheReadTokens: usage.cache_read_input_tokens || 0,
-        cacheWriteTokens: usage.cache_creation_input_tokens || 0,
-      } : undefined,
+      usage: anthropicUsage(usage),
     };
   }
 
@@ -557,7 +552,7 @@ export class AnthropicProvider implements LLMProvider {
       // ends the run with a chopped-off reply. See ChatResponse.truncated.
       let stopReason: string | undefined;
       const state = new AnthropicStreamState();
-      let inputTokens = 0;
+      let inputUsage: Record<string, number> | undefined;
       let outputTokens = 0;
 
       try {
@@ -598,7 +593,7 @@ export class AnthropicProvider implements LLMProvider {
                 // cacheReadTokens relative to input_tokens confirms the cache_control
                 // breakpoints in buildRequestBody are actually being hit.
                 const u = chunk.message.usage;
-                inputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+                inputUsage = u;
                 if (u.cache_read_input_tokens || u.cache_creation_input_tokens) {
                   console.log(`[Anthropic] cache read=${u.cache_read_input_tokens || 0} write=${u.cache_creation_input_tokens || 0} fresh=${u.input_tokens || 0}`);
                 }
@@ -624,7 +619,7 @@ export class AnthropicProvider implements LLMProvider {
         content: '',
         model: modelToUse,
         truncated,
-        usage: { promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: inputTokens + outputTokens },
+        usage: anthropicUsage({ ...inputUsage, output_tokens: outputTokens }),
         toolCalls: toolCalls.length ? toolCalls : undefined,
         thinkingBlocks: thinkingBlocks.length ? thinkingBlocks : undefined,
       };

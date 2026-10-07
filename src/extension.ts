@@ -185,6 +185,12 @@ function registerCommands(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('frappe-copilot.toggleChat', async () => {
+      await openChat();
+    })
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('frappe-copilot.openChatInTab', async () => {
       await openChat(true);
     })

@@ -123,19 +123,26 @@ export interface ChatOptions {
   onRetry?: (attempt: number, delaySec: number, error: string) => void;
 }
 
+/** Token counts for one model call. `promptTokens` is the full logical prompt,
+ * including cached portions, so it still reflects context-window pressure. */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  /** Prompt tokens charged as ordinary, uncached input. */
+  freshInputTokens?: number;
+  /** Prompt tokens served from a provider cache. */
+  cacheReadTokens?: number;
+  /** Prompt tokens written into a provider cache. */
+  cacheWriteTokens?: number;
+}
+
 /** Response from a provider chat call (non-streaming). */
 export interface ChatResponse {
   content: string;
   reasoning?: string;
   model: string;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-    /** Tokens served from Anthropic's prompt cache (near-free) vs. freshly written to it. */
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-  };
+  usage?: TokenUsage;
   /** Set on the final chunk of a stream (or the one-shot chat() response) when
    *  the provider cut the turn off because it hit its output-token ceiling —
    *  distinct from the model naturally finishing. Without this, a response

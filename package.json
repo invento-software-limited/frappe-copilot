@@ -2,7 +2,7 @@
   "name": "frappe-copilot",
   "displayName": "Frappe Copilot",
   "description": "AI-powered Frappe/ERPNext development assistant. Integrates with OpenCode Zen for agentic code generation, bench management, and Frappe app scaffolding.",
-  "version": "1.12.2",
+  "version": "1.13.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/invento-software-limited/frappe-copilot.git"
@@ -34,6 +34,11 @@
       {
         "command": "frappe-copilot.start",
         "title": "Frappe Copilot: Open Chat"
+      },
+      {
+        "command": "frappe-copilot.toggleChat",
+        "title": "Frappe Copilot: Toggle Chat",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "frappe-copilot.openChatInTab",
@@ -258,9 +263,9 @@
         },
         "frappe-copilot.runLimits.pauseAfterTokens": {
           "type": "number",
-          "default": 0,
+          "default": 200000,
           "minimum": 0,
-          "description": "Pause a request once it has used this many tokens (input + output, summed over every model call) and ask whether to continue. 0 turns it off."
+          "description": "Pause a request once it has used this many logical tokens (fresh + cached input + output, summed over every model call) and ask whether to continue. 0 turns it off."
         },
         "frappe-copilot.provider": {
           "type": "string",
@@ -427,7 +432,7 @@
         "frappe-copilot.compaction.thresholdTokens": {
           "type": "number",
           "default": 40000,
-          "description": "Token count of conversation history above which Frappe Copilot offers to compact it. Leave unset to use 50% of the active model's context window (history past 80% is compacted automatically). Compaction only ever summarizes what gets sent going forward — the full raw conversation on disk is never deleted.",
+          "description": "Token count of conversation history above which Frappe Copilot offers to compact it. Defaults to 40k; history past 80% of the model context window is compacted automatically. Compaction only summarizes what gets sent going forward — the full raw conversation on disk is never deleted.",
           "minimum": 2000
         },
         "frappe-copilot.compaction.autoOffer": {
@@ -450,7 +455,7 @@
     },
     "keybindings": [
       {
-        "command": "frappe-copilot.start",
+        "command": "frappe-copilot.toggleChat",
         "key": "ctrl+alt+b",
         "mac": "cmd+alt+b"
       },
@@ -472,7 +477,18 @@
       }
     ],
     "menus": {
+      "editor/title": [
+        {
+          "command": "frappe-copilot.toggleChat",
+          "group": "navigation@50"
+        }
+      ],
       "view/title": [
+        {
+          "command": "frappe-copilot.toggleChat",
+          "when": "view == frappe-copilot.agentChat",
+          "group": "navigation@0"
+        },
         {
           "command": "frappe-copilot.openChatInTab",
           "when": "view == frappe-copilot.agentChat",
@@ -487,6 +503,11 @@
           "command": "frappe-copilot.newSession",
           "when": "view == frappe-copilot.sessions",
           "group": "navigation"
+        },
+        {
+          "command": "frappe-copilot.toggleChat",
+          "when": "view == frappe-copilot.sessions",
+          "group": "navigation@0"
         },
         {
           "command": "frappe-copilot.newSkill",

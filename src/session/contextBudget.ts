@@ -3,8 +3,11 @@ import { Message } from '../types';
 
 /** Start clearing old tool output once a step's prompt passes this share of the window. */
 export const PRUNE_AT = 0.6;
+/** Large context windows still need an absolute cost ceiling. */
+export const PRUNE_AT_TOKENS = 80_000;
 /** Past this share, keep only the newest tool output. */
 const AGGRESSIVE_AT = 0.85;
+const AGGRESSIVE_AT_TOKENS = 160_000;
 const KEEP_RECENT = 4;
 const MIN_PRUNE_CHARS = 600;
 const PREVIEW_CHARS = 300;
@@ -32,12 +35,14 @@ export function contextWindowFor(model: string): number {
 }
 
 /** Clears the bodies of older tool results (and the large inputs of older
- *  write calls) in a run's transcript once it nears the context window — the
- *  same "tool result clearing" Claude Code does, with no extra LLM call.
+ *  write calls) once a run nears its context limit or an absolute cost ceiling —
+ *  the same "tool result clearing" Claude Code does, with no extra LLM call.
  *  Returns how many characters were freed. */
 export function pruneRunHistory(history: Message[], promptTokens: number, window: number): number {
-  if (promptTokens < window * PRUNE_AT) return 0;
-  const keep = promptTokens >= window * AGGRESSIVE_AT ? 1 : KEEP_RECENT;
+  const pruneAt = Math.min(window * PRUNE_AT, PRUNE_AT_TOKENS);
+  if (promptTokens < pruneAt) return 0;
+  const aggressiveAt = Math.min(window * AGGRESSIVE_AT, AGGRESSIVE_AT_TOKENS);
+  const keep = promptTokens >= aggressiveAt ? 1 : KEEP_RECENT;
   const resultIdx = history.map((m, i) => (isToolResultMessage(m) ? i : -1)).filter(i => i >= 0);
   const cutoff = resultIdx.length > keep ? resultIdx[resultIdx.length - keep] : -1;
 

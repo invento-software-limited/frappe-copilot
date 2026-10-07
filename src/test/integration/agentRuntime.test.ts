@@ -186,6 +186,39 @@ test('a run that hits the step limit stops when the user says Stop', () => withH
   }
 ));
 
+test('run usage preserves fresh and cached input categories', () => withHarness(
+  [{ chunks: [{ content: 'done', usage: {
+    promptTokens: 20_000,
+    completionTokens: 500,
+    totalTokens: 20_500,
+    freshInputTokens: 4_000,
+    cacheReadTokens: 15_000,
+    cacheWriteTokens: 1_000,
+  } }] }],
+  async h => {
+    await h.runtime.orchestrator.run('report usage');
+    const usage = h.ui.ofType('runUsage').at(-1);
+    assert.equal(usage.promptTokens, 20_000);
+    assert.equal(usage.completionTokens, 500);
+    assert.equal(usage.freshInputTokens, 4_000);
+    assert.equal(usage.cacheReadTokens, 15_000);
+    assert.equal(usage.cacheWriteTokens, 1_000);
+  }
+));
+
+test('conversation compaction is offered at the 40k default on large-window models', () => withHarness(
+  [],
+  async h => {
+    settings.set('frappe-copilot.contextWindowTokens', 1_000_000);
+    const session = h.sessions.createSession('Long chat');
+    h.sessions.appendMessage(session.id, { role: 'user', content: 'x'.repeat(180_000) });
+    h.runtime.deps.compaction.reportSessionSize(session);
+    const offer = h.ui.ofType('compactionOffered').at(-1);
+    assert.equal(offer.thresholdTokens, 40_000);
+    assert.ok(offer.estimatedTokens > offer.thresholdTokens);
+  }
+));
+
 test('Continue doubles the limit and lets the run finish', () => withHarness(
   [callTool('list_dir', { path: '.' }, 'a'), callTool('list_dir', { path: '.' }, 'b'), say('finished')],
   async h => {
